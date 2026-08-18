@@ -109,6 +109,13 @@ class AssetStore:
             preview_filename=preview_filename,
         )
 
+    def delete(self, record: AssetRecord) -> None:
+        """Remove files created for an asset record."""
+
+        (self.root / record.storage_filename).unlink(missing_ok=True)
+        if record.preview_filename:
+            (self.root / record.preview_filename).unlink(missing_ok=True)
+
     def _create_tiff_preview(self, source: Path, destination: Path) -> None:
         """Render the first TIFF frame to PNG without changing the source."""
 

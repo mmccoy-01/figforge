@@ -1,4 +1,4 @@
-"""Local project browser shell."""
+"""Project browser shell."""
 
 from shiny import ui
 
@@ -7,25 +7,23 @@ def my_figures_panel():
     return ui.tags.section(
         ui.tags.header(
             ui.tags.div(
-                ui.tags.p("Local workspace", class_="page-eyebrow"),
+                ui.tags.p("Project workspace", class_="page-eyebrow"),
                 ui.tags.h1("My Figures"),
-                ui.tags.p("Saved projects will be available here on this computer."),
+                ui.tags.p(
+                    "Local drafts appear here; cloud deployments use portable project files."
+                ),
             ),
             ui.tags.button(
                 "+ New figure",
+                id="new_project",
                 type="button",
                 class_="wide-button wide-button--accent new-figure-button",
-                disabled=True,
-                title="Project creation is part of the persistence milestone",
+                title="Start a new blank figure",
             ),
             class_="figures-header",
         ),
-        ui.tags.div(
-            ui.tags.div("□", class_="placeholder-icon", aria_hidden="true"),
-            ui.tags.h2("No saved figures yet"),
-            ui.tags.p("Your local projects, previews, and recent edit times will appear here."),
-            class_="figures-empty-state",
-        ),
+        ui.output_ui("project_browser"),
+        ui.output_ui("revision_browser"),
         class_="figures-screen",
         aria_label="My Figures project browser",
     )

@@ -18,6 +18,7 @@ def build_app_ui():
         ui.tags.head(
             ui.tags.title("FigForge"),
             ui.include_css(css_path),
+            ui.tags.script(src="/static/js/browser_recovery.js", defer=True),
             ui.tags.script(src="/static/js/canvas.js", defer=True),
         ),
         ui.tags.div(
@@ -32,6 +33,7 @@ def build_app_ui():
                 ),
                 ui.tags.div(
                     _header_button("Save", "save_project", primary=True),
+                    _header_button("Save Version", "save_version"),
                     _header_button("Export", "export_figure"),
                     class_="header-actions",
                     aria_label="Project actions",
@@ -60,13 +62,26 @@ def build_app_ui():
 
 def _header_button(label: str, element_id: str, *, primary: bool = False):
     style_class = "header-button header-button--primary" if primary else "header-button"
+    available = element_id in {"save_project", "save_version", "export_figure"}
     return ui.tags.button(
         label,
         id=element_id,
         type="button",
         class_=style_class,
-        disabled=True,
-        title=f"{label} will be enabled in a later milestone",
+        disabled=not available,
+        title=(
+            "Save the current draft"
+            if element_id == "save_project"
+            else (
+                "Create an immutable local version checkpoint"
+                if element_id == "save_version"
+                else (
+                    "Export a publication-ready PNG, TIFF, or PDF"
+                    if element_id == "export_figure"
+                    else f"{label} will be enabled in a later milestone"
+                )
+            )
+        ),
     )
 
 

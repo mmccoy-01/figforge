@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  const SCHEMA_VERSION = 5;
+  const SCHEMA_VERSION = 7;
   const MAX_LANES = 30;
   const DEFAULT_LANE_OPACITY = 0.35;
   const DEFAULT_GRID_LEFT = 0.05;
@@ -27,6 +27,7 @@
       this.context = canvas.getContext("2d");
       this.emptyState = document.getElementById("canvas_empty_state");
       this.images = [];
+      this.templateFrame = null;
       this.imageElements = new Map();
       this.laneGrids = new Map();
       this.labelRows = [];
@@ -35,6 +36,10 @@
       this.selectionAnchor = null;
       this.editingCell = null;
       this.draggingSelection = false;
+      this.isLoadingProject = false;
+      this.isApplyingHistory = false;
+      this.undoStack = [];
+      this.redoStack = [];
       this.interaction = null;
       this.stageWidth = 0;
       this.stageHeight = 0;
@@ -53,7 +58,23 @@
 
       document.addEventListener("keydown", (event) => {
         const target = event.target;
-        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+        const editingText = target instanceof HTMLInputElement
+          || target instanceof HTMLTextAreaElement
+          || target?.isContentEditable;
+        const commandKey = event.ctrlKey || event.metaKey;
+        if (commandKey && event.key.toLowerCase() === "z" && !editingText) {
+          event.preventDefault();
+          if (event.shiftKey) this.redo();
+          else this.undo();
+          return;
+        }
+        if (commandKey && event.key.toLowerCase() === "y" && !editingText) {
+          event.preventDefault();
+          this.redo();
+          return;
+        }
+        if (editingText) return;
+        if (target instanceof Element && target.closest("#label_grid_overlay")) return;
         if ((event.key === "Delete" || event.key === "Backspace") && this.selectedId) {
           event.preventDefault();
           this.deleteSelected();
@@ -61,6 +82,70 @@
       });
 
       document.addEventListener("click", (event) => {
+        if (event.target.closest("#confirm_save_version")) {
+          window.Shiny?.setInputValue(
+            "save_version_confirm",
+            {
+              note: document.getElementById("version_note")?.value || "",
+              timestamp: Date.now(),
+            },
+            { priority: "event" },
+          );
+          return;
+        }
+        const openProject = event.target.closest("[data-open-project]");
+        if (openProject) {
+          window.Shiny?.setInputValue(
+            "open_project_request",
+            { project_id: openProject.dataset.openProject, timestamp: Date.now() },
+            { priority: "event" },
+          );
+          return;
+        }
+        const projectHistory = event.target.closest("[data-project-history]");
+        if (projectHistory) {
+          window.Shiny?.setInputValue(
+            "history_project_request",
+            { project_id: projectHistory.dataset.projectHistory, timestamp: Date.now() },
+            { priority: "event" },
+          );
+          return;
+        }
+        const previewRevision = event.target.closest("[data-preview-revision]");
+        if (previewRevision) {
+          window.Shiny?.setInputValue(
+            "preview_revision_request",
+            {
+              project_id: previewRevision.dataset.projectId,
+              revision_id: previewRevision.dataset.previewRevision,
+              timestamp: Date.now(),
+            },
+            { priority: "event" },
+          );
+          return;
+        }
+        const restoreRevision = event.target.closest("[data-restore-revision]");
+        if (restoreRevision) {
+          window.Shiny?.setInputValue(
+            "restore_revision_request",
+            {
+              project_id: restoreRevision.dataset.projectId,
+              revision_id: restoreRevision.dataset.restoreRevision,
+              timestamp: Date.now(),
+            },
+            { priority: "event" },
+          );
+          return;
+        }
+        if (event.target.closest("[data-close-history]")) {
+          window.Shiny?.setInputValue("close_history_request", Date.now(), { priority: "event" });
+          return;
+        }
+        if (event.target.closest("#new_project")) {
+          window.FigForgeRecovery?.clear();
+          window.Shiny?.setInputValue("new_project_request", Date.now(), { priority: "event" });
+          return;
+        }
         const assetButton = event.target.closest("[data-figforge-asset]");
         if (!assetButton) return;
         this.addAsset({
@@ -74,7 +159,13 @@
       });
 
       document.getElementById("fit_image")?.addEventListener("click", () => this.fitSelected());
+      document.getElementById("start_blank_template")?.addEventListener(
+        "click",
+        () => this.startBlankTemplate(),
+      );
       document.getElementById("delete_image")?.addEventListener("click", () => this.deleteSelected());
+      document.getElementById("undo_action")?.addEventListener("click", () => this.undo());
+      document.getElementById("redo_action")?.addEventListener("click", () => this.redo());
       document.getElementById("toggle_lane_guides")?.addEventListener("click", () => this.toggleLaneGuides());
       document.getElementById("reset_lane_grid")?.addEventListener("click", () => this.resetLaneGrid());
       document.getElementById("lane_count")?.addEventListener("input", () => this.updateLaneCount());
@@ -98,6 +189,33 @@
       document.getElementById("cell_underline")?.addEventListener("click", () => this.toggleCellProperty("underline"));
       document.getElementById("cell_rotation")?.addEventListener("change", (event) => this.applyCellProperty("rotation", Number(event.target.value)));
       document.getElementById("cell_border_preset")?.addEventListener("change", (event) => this.applyBorderPreset(event.target.value));
+      document.getElementById("cell_border_extension")?.addEventListener("input", (event) => {
+        const parsed = Number(event.target.value);
+        const length = Math.max(0, Math.min(500, Number.isFinite(parsed) ? parsed : 0));
+        event.target.value = String(length);
+        this.applyCellProperty("border_extension", length);
+      });
+      document.getElementById("fill_lane_numbers")?.addEventListener("click", () => this.fillLaneNumbers());
+      document.getElementById("repeat_pattern")?.addEventListener("click", () => this.repeatSelectedPattern());
+      document.getElementById("save_project")?.addEventListener("click", () => {
+        this.setSaveStatus({ label: "Saving…", state: "saving" });
+        window.Shiny?.setInputValue("save_project_request", Date.now(), { priority: "event" });
+      });
+      document.getElementById("save_version")?.addEventListener("click", () => {
+        window.Shiny?.setInputValue("save_version_request", Date.now(), { priority: "event" });
+      });
+      document.getElementById("export_figure")?.addEventListener("click", () => {
+        window.Shiny?.setInputValue("export_figure_request", Date.now(), { priority: "event" });
+      });
+      document.getElementById("figure_name")?.addEventListener("input", (event) => {
+        this.setSaveStatus({ label: "Editing…", state: "editing" });
+        window.Shiny?.setInputValue(
+          "project_name_change",
+          { value: event.target.value, timestamp: Date.now() },
+          { priority: "event" },
+        );
+        window.FigForgeRecovery?.scheduleDraft(event.target.value, this.state());
+      });
 
       const labelOverlay = document.getElementById("label_grid_overlay");
       labelOverlay?.addEventListener("pointerdown", (event) => this.handleCellPointerDown(event));
@@ -107,6 +225,7 @@
       labelOverlay?.addEventListener("keydown", (event) => this.handleCellKeyDown(event));
       labelOverlay?.addEventListener("input", (event) => this.handleCellInput(event));
       labelOverlay?.addEventListener("focusout", (event) => this.handleCellBlur(event));
+      labelOverlay?.addEventListener("paste", (event) => this.handleCellPaste(event));
       document.addEventListener("pointerup", () => { this.draggingSelection = false; });
     }
 
@@ -127,6 +246,7 @@
     }
 
     addAsset(asset) {
+      window.FigForgeRecovery?.captureAsset(asset);
       const existing = this.images.find((image) => image.asset_id === asset.asset_id);
       if (existing) {
         this.select(existing.image_id);
@@ -137,7 +257,19 @@
       imageElement.decoding = "async";
       imageElement.onload = () => {
         const imageId = `image_${crypto.randomUUID()}`;
-        const size = this.fittedSize(asset.width, asset.height, 0.72, 0.7);
+        let size = this.fittedSize(asset.width, asset.height, 0.72, 0.7);
+        let x = Math.round((this.stageWidth - size.width) / 2);
+        let y = Math.round((this.stageHeight - size.height) / 2);
+        const template = this.templateFrame;
+        if (template) {
+          const scale = Math.min(template.width / asset.width, template.height / asset.height);
+          size = {
+            width: Math.max(MIN_IMAGE_SIZE, Math.round(asset.width * scale)),
+            height: Math.max(MIN_IMAGE_SIZE, Math.round(asset.height * scale)),
+          };
+          x = Math.round(template.x + (template.width - size.width) / 2);
+          y = Math.round(template.y + (template.height - size.height) / 2);
+        }
         const image = {
           image_id: imageId,
           asset_id: asset.asset_id,
@@ -146,12 +278,24 @@
           display_url: asset.url,
           original_width: asset.width,
           original_height: asset.height,
-          x: Math.round((this.stageWidth - size.width) / 2),
-          y: Math.round((this.stageHeight - size.height) / 2),
+          x,
+          y,
           width: size.width,
           height: size.height,
           rotation: 0,
         };
+        if (template) {
+          const grid = this.laneGrids.get(template.image_id);
+          this.laneGrids.delete(template.image_id);
+          if (grid) {
+            grid.image_id = imageId;
+            this.laneGrids.set(imageId, grid);
+          }
+          for (const row of this.labelRows.filter((candidate) => candidate.image_id === template.image_id)) {
+            row.image_id = imageId;
+          }
+          this.templateFrame = null;
+        }
         this.imageElements.set(imageId, imageElement);
         this.images.push(image);
         this.select(imageId);
@@ -159,6 +303,86 @@
       };
       imageElement.onerror = () => this.showCanvasError(`Could not display ${asset.filename}`);
       imageElement.src = asset.url;
+    }
+
+    startBlankTemplate() {
+      if (this.images.length || this.templateFrame) {
+        this.showLabelStatus("Start a new project before creating a blank template.", "error");
+        return;
+      }
+      const width = Math.max(120, Math.min(this.stageWidth - 32, Math.round(this.stageWidth * 0.72)));
+      const height = Math.max(100, Math.min(this.stageHeight - 80, Math.round(this.stageHeight * 0.48)));
+      this.templateFrame = {
+        image_id: `template_${crypto.randomUUID()}`,
+        x: Math.round((this.stageWidth - width) / 2),
+        y: Math.round((this.stageHeight - height) / 2),
+        width,
+        height,
+        is_template: true,
+      };
+      this.createLaneGrid(this.templateFrame, true);
+      this.select(this.templateFrame.image_id);
+      this.syncState();
+      this.showLabelStatus("Blank template ready. Add rows now or upload an image later.", "success");
+    }
+
+    async loadProject(payload) {
+      this.isLoadingProject = true;
+      window.FigForgeRecovery?.recordProject(payload);
+      this.finishEditing(false);
+      this.images = (payload.state?.images || []).map((image) => ({ ...image }));
+      this.templateFrame = payload.state?.template_frame
+        ? { ...payload.state.template_frame, is_template: true }
+        : null;
+      this.imageElements.clear();
+      this.laneGrids = new Map(
+        (payload.state?.lane_grids || []).map((grid) => [
+          grid.image_id,
+          { ...grid, boundaries: [...(grid.boundaries || [])] },
+        ]),
+      );
+      this.labelRows = (payload.state?.label_rows || []).map((row) => ({
+        ...row,
+        cells: row.cells.map((cell) => ({
+          ...cell,
+          rowspan: Number(cell.rowspan || 1),
+          merged_into_row: cell.merged_into_row ?? null,
+          border_extension: Number(cell.border_extension || 0),
+          borders: { ...cell.borders },
+        })),
+      }));
+      this.selectedId = this.images[0]?.image_id || this.templateFrame?.image_id || null;
+      this.selectedCell = null;
+      this.selectionAnchor = null;
+      this.editingCell = null;
+      this.interaction = null;
+      this.undoStack = [];
+      this.redoStack = [];
+      this.updateHistoryControls();
+
+      await Promise.all(
+        this.images.map((image) => new Promise((resolve) => {
+          const element = new Image();
+          element.decoding = "async";
+          element.onload = () => {
+            this.imageElements.set(image.image_id, element);
+            resolve();
+          };
+          element.onerror = () => {
+            this.showCanvasError(`Could not reopen ${image.filename}`);
+            resolve();
+          };
+          element.src = image.display_url;
+        })),
+      );
+
+      const name = document.getElementById("figure_name");
+      if (name) name.value = payload.name || "Untitled figure";
+      this.renderLabelRows();
+      this.draw();
+      this.updateProperties();
+      this.isLoadingProject = false;
+      this.setSaveStatus({ label: "Saved", state: "saved" });
     }
 
     fittedSize(originalWidth, originalHeight, widthFraction, heightFraction) {
@@ -174,6 +398,16 @@
     fitSelected() {
       const image = this.selectedImage();
       if (!image) return;
+      if (image.is_template) {
+        image.width = Math.max(120, Math.round(this.stageWidth * 0.86));
+        image.height = Math.max(100, Math.round(this.stageHeight * 0.58));
+        image.x = Math.round((this.stageWidth - image.width) / 2);
+        image.y = Math.round((this.stageHeight - image.height) / 2);
+        this.draw();
+        this.updateProperties();
+        this.syncState();
+        return;
+      }
       const size = this.fittedSize(image.original_width, image.original_height, 0.86, 0.82);
       image.width = size.width;
       image.height = size.height;
@@ -187,6 +421,39 @@
     deleteSelected() {
       if (!this.selectedId) return;
       const deleteId = this.selectedId;
+      const imageIndex = this.images.findIndex((image) => image.image_id === deleteId);
+      const image = this.images[imageIndex];
+      if (!image) return;
+      const grid = this.laneGrids.get(deleteId);
+      const command = {
+        type: "delete-image",
+        image: { ...image },
+        imageIndex,
+        imageElement: this.imageElements.get(deleteId) || null,
+        grid: grid ? { ...grid, boundaries: [...grid.boundaries] } : null,
+        rows: this.labelRows
+          .map((row, index) => ({ row, index }))
+          .filter(({ row }) => row.image_id === deleteId)
+          .map(({ row, index }) => ({
+            index,
+            row: {
+              ...row,
+              cells: row.cells.map((cell) => ({
+                ...cell,
+                borders: { ...cell.borders },
+              })),
+            },
+          })),
+      };
+      this.applyDeleteCommand(command);
+      this.undoStack.push(command);
+      this.redoStack = [];
+      this.updateHistoryControls();
+      this.syncState(true);
+    }
+
+    applyDeleteCommand(command) {
+      const deleteId = command.image.image_id;
       this.images = this.images.filter((image) => image.image_id !== deleteId);
       this.imageElements.delete(deleteId);
       this.laneGrids.delete(deleteId);
@@ -198,7 +465,77 @@
       this.draw();
       this.updateProperties();
       this.renderLabelRows();
-      this.syncState();
+    }
+
+    undo() {
+      const command = this.undoStack.pop();
+      if (!command || command.type !== "delete-image") return;
+      this.isApplyingHistory = true;
+      this.images.splice(
+        Math.min(command.imageIndex, this.images.length),
+        0,
+        { ...command.image },
+      );
+      if (command.imageElement) {
+        this.imageElements.set(command.image.image_id, command.imageElement);
+      } else {
+        const element = new Image();
+        element.decoding = "async";
+        element.onload = () => {
+          this.imageElements.set(command.image.image_id, element);
+          this.draw();
+        };
+        element.src = command.image.display_url;
+      }
+      if (command.grid) {
+        this.laneGrids.set(
+          command.image.image_id,
+          { ...command.grid, boundaries: [...command.grid.boundaries] },
+        );
+      }
+      for (const item of command.rows) {
+        this.labelRows.splice(
+          Math.min(item.index, this.labelRows.length),
+          0,
+          {
+            ...item.row,
+            cells: item.row.cells.map((cell) => ({
+              ...cell,
+              borders: { ...cell.borders },
+            })),
+          },
+        );
+      }
+      this.selectedId = command.image.image_id;
+      this.redoStack.push(command);
+      this.renderLabelRows();
+      this.draw();
+      this.updateProperties();
+      this.updateHistoryControls();
+      this.syncState(true);
+      this.isApplyingHistory = false;
+    }
+
+    redo() {
+      const command = this.redoStack.pop();
+      if (!command || command.type !== "delete-image") return;
+      this.isApplyingHistory = true;
+      this.applyDeleteCommand(command);
+      this.undoStack.push(command);
+      this.updateHistoryControls();
+      this.syncState(true);
+      this.isApplyingHistory = false;
+    }
+
+    updateHistoryControls() {
+      document.getElementById("undo_action")?.toggleAttribute(
+        "disabled",
+        this.undoStack.length === 0,
+      );
+      document.getElementById("redo_action")?.toggleAttribute(
+        "disabled",
+        this.redoStack.length === 0,
+      );
     }
 
     select(imageId) {
@@ -213,7 +550,12 @@
     }
 
     selectedImage() {
-      return this.images.find((image) => image.image_id === this.selectedId) || null;
+      return this.images.find((image) => image.image_id === this.selectedId)
+        || (this.templateFrame?.image_id === this.selectedId ? this.templateFrame : null);
+    }
+
+    surfaces() {
+      return this.templateFrame ? [this.templateFrame, ...this.images] : [...this.images];
     }
 
     selectedGrid() {
@@ -285,10 +627,15 @@
       const laneCount = this.readLaneCount();
       const grid = this.selectedGrid();
       if (!grid) return;
+      const previousLaneCount = grid.lane_count;
       grid.lane_count = laneCount;
       grid.uniform = true;
       grid.boundaries = [];
-      this.resizeRowsForGrid(grid.image_id, laneCount);
+      if (this.templateFrame?.image_id === grid.image_id) {
+        this.adaptTemplateRows(grid.image_id, previousLaneCount, laneCount);
+      } else {
+        this.resizeRowsForGrid(grid.image_id, laneCount);
+      }
       this.draw();
       this.syncState();
     }
@@ -410,8 +757,9 @@
     }
 
     hitImage(point) {
-      for (let index = this.images.length - 1; index >= 0; index -= 1) {
-        const image = this.images[index];
+      const surfaces = this.surfaces();
+      for (let index = surfaces.length - 1; index >= 0; index -= 1) {
+        const image = surfaces[index];
         if (point.x >= image.x && point.x <= image.x + image.width && point.y >= image.y && point.y <= image.y + image.height) return image;
       }
       return null;
@@ -460,6 +808,17 @@
 
     draw() {
       this.context.clearRect(0, 0, this.stageWidth, this.stageHeight);
+      if (this.templateFrame) {
+        this.drawTemplateFrame(this.templateFrame);
+        const templateGrid = this.laneGrids.get(this.templateFrame.image_id);
+        if (templateGrid?.visible) {
+          this.drawLaneGrid(
+            this.templateFrame,
+            templateGrid,
+            this.templateFrame.image_id === this.selectedId,
+          );
+        }
+      }
       for (const image of this.images) {
         const element = this.imageElements.get(image.image_id);
         if (element) this.context.drawImage(element, image.x, image.y, image.width, image.height);
@@ -468,8 +827,36 @@
       }
       const selected = this.selectedImage();
       if (selected) this.drawSelection(selected);
-      this.emptyState?.classList.toggle("is-hidden", this.images.length > 0);
+      this.emptyState?.classList.toggle("is-hidden", this.surfaces().length > 0);
       this.positionLabelRows();
+    }
+
+    drawTemplateFrame(frame) {
+      this.context.save();
+      this.context.fillStyle = "rgba(239, 246, 244, 0.92)";
+      this.context.fillRect(frame.x, frame.y, frame.width, frame.height);
+      this.context.strokeStyle = "#7f9b96";
+      this.context.lineWidth = 2;
+      this.context.setLineDash([8, 6]);
+      this.context.strokeRect(frame.x, frame.y, frame.width, frame.height);
+      this.context.setLineDash([]);
+      this.context.textAlign = "center";
+      this.context.textBaseline = "middle";
+      this.context.fillStyle = "#385a55";
+      this.context.font = "600 14px system-ui, sans-serif";
+      this.context.fillText(
+        "Template image area",
+        frame.x + frame.width / 2,
+        frame.y + frame.height / 2 - 10,
+      );
+      this.context.fillStyle = "#66817d";
+      this.context.font = "11px system-ui, sans-serif";
+      this.context.fillText(
+        "Upload an image later to attach it",
+        frame.x + frame.width / 2,
+        frame.y + frame.height / 2 + 12,
+      );
+      this.context.restore();
     }
 
     drawLaneGrid(image, grid, selected) {
@@ -547,16 +934,22 @@
       }
 
       const label = document.getElementById("selected_object_label");
-      if (label) label.textContent = image ? image.filename : "Nothing selected";
+      if (label) label.textContent = image
+        ? image.is_template ? "Blank template surface" : image.filename
+        : "Nothing selected";
       document.getElementById("fit_image")?.toggleAttribute("disabled", !image);
-      document.getElementById("delete_image")?.toggleAttribute("disabled", !image);
+      document.getElementById("delete_image")?.toggleAttribute("disabled", !image || image.is_template);
       document.getElementById("add_row")?.toggleAttribute("disabled", !image);
       this.updateLaneControls(image);
       this.updateRowControls(image);
       this.updateFormattingControls();
+      this.updateProductivityControls();
 
       document.querySelectorAll("[data-figforge-asset]").forEach((button) => {
-        button.classList.toggle("is-active", Boolean(image && button.dataset.assetId === image.asset_id));
+        button.classList.toggle(
+          "is-active",
+          Boolean(image && !image.is_template && button.dataset.assetId === image.asset_id),
+        );
       });
     }
 
@@ -592,28 +985,35 @@
       const image = this.selectedImage();
       if (!image) return;
       const grid = this.selectedGrid() || this.createLaneGrid(image, false);
-      const rowNumber = this.labelRows.filter((row) => row.image_id === image.image_id).length + 1;
-      const row = {
-        row_id: `row_${crypto.randomUUID()}`,
-        image_id: image.image_id,
-        name: `Row ${rowNumber}`,
-        position,
-        height: 30,
-        cells: Array.from({ length: grid.lane_count }, () => this.defaultCell()),
-      };
+      const row = this.createLabelRow(image.image_id, position, grid.lane_count);
       this.labelRows.push(row);
       this.selectedCell = { rowId: row.row_id, col: 0 };
       this.selectionAnchor = { ...this.selectedCell };
+      this.ensureLabelRowsFit(image);
       this.renderLabelRows();
+      this.draw();
       this.updateProperties();
       this.focusSelectedCell();
       this.syncState();
+    }
+
+    createLabelRow(imageId, position, laneCount) {
+      const rowNumber = this.labelRows.filter((row) => row.image_id === imageId).length + 1;
+      return {
+        row_id: `row_${crypto.randomUUID()}`,
+        image_id: imageId,
+        name: `Row ${rowNumber}`,
+        position,
+        height: 30,
+        cells: Array.from({ length: laneCount }, () => this.defaultCell()),
+      };
     }
 
     deleteSelectedRow() {
       const row = this.selectedRow();
       if (!row) return;
       this.finishEditing(true);
+      this.clearMergesForImage(row.image_id);
       this.labelRows = this.labelRows.filter((candidate) => candidate.row_id !== row.row_id);
       this.selectedCell = null;
       this.selectionAnchor = null;
@@ -638,8 +1038,12 @@
     positionSelectedRow(position) {
       const row = this.selectedRow();
       if (!row || !["above", "below"].includes(position)) return;
+      this.clearMergesForImage(row.image_id);
       row.position = position;
+      this.ensureLabelRowsFit(this.selectedImage());
       this.renderLabelRows();
+      this.draw();
+      this.updateProperties();
       this.focusSelectedCell();
       this.syncState();
     }
@@ -651,7 +1055,10 @@
       row.height = Math.max(20, Math.min(120, Number.isFinite(parsed) ? parsed : 30));
       const input = document.getElementById("label_row_height");
       if (input) input.value = String(row.height);
+      this.ensureLabelRowsFit(this.selectedImage());
       this.renderLabelRows();
+      this.draw();
+      this.updateProperties();
       this.focusSelectedCell();
       this.syncState();
     }
@@ -660,7 +1067,9 @@
       return {
         text: "",
         colspan: 1,
+        rowspan: 1,
         merged_into: null,
+        merged_into_row: null,
         align: "center",
         vertical_align: "middle",
         font_size: 12,
@@ -668,6 +1077,7 @@
         italic: false,
         underline: false,
         rotation: 0,
+        border_extension: 0,
         borders: { top: true, right: true, bottom: true, left: true },
       };
     }
@@ -679,7 +1089,11 @@
 
     resizeRowsForGrid(imageId, laneCount) {
       let changed = false;
-      for (const row of this.labelRows.filter((candidate) => candidate.image_id === imageId)) {
+      const rows = this.labelRows.filter((candidate) => candidate.image_id === imageId);
+      if (rows.some((row) => row.cells.length !== laneCount)) {
+        this.clearMergesForImage(imageId);
+      }
+      for (const row of rows) {
         if (row.cells.length > laneCount) {
           row.cells = row.cells.slice(0, laneCount);
           changed = true;
@@ -688,7 +1102,6 @@
           row.cells.push(this.defaultCell());
           changed = true;
         }
-        this.normalizeMerges(row);
       }
       if (this.selectedCell && this.selectedCell.col >= laneCount) {
         this.selectedCell.col = laneCount - 1;
@@ -697,6 +1110,130 @@
         this.selectionAnchor.col = laneCount - 1;
       }
       if (changed) this.renderLabelRows();
+    }
+
+    adaptTemplateRows(imageId, oldLaneCount, newLaneCount) {
+      const rows = this.labelRows.filter((candidate) => candidate.image_id === imageId);
+      if (!rows.length || oldLaneCount === newLaneCount) return;
+      const snapshots = rows.map((row) => row.cells.map((cell) => ({
+        ...cell,
+        borders: { ...cell.borders },
+      })));
+      const mergeAnchors = [];
+      snapshots.forEach((cells, rowIndex) => {
+        cells.forEach((cell, column) => {
+          if (cell.merged_into === null && (cell.colspan > 1 || cell.rowspan > 1)) {
+            mergeAnchors.push({ rowIndex, column, cell });
+          }
+        });
+      });
+
+      rows.forEach((row, rowIndex) => {
+        const sourceCells = snapshots[rowIndex];
+        const laneNumbered = sourceCells.every(
+          (cell, column) => cell.merged_into === null
+            && cell.colspan === 1
+            && cell.rowspan === 1
+            && cell.text === String(column + 1),
+        );
+        const repeatPeriod = laneNumbered ? null : this.repeatingCellPeriod(sourceCells);
+        row.cells = Array.from({ length: newLaneCount }, (_, column) => {
+          const proportional = Math.min(
+            sourceCells.length - 1,
+            Math.floor(column * sourceCells.length / newLaneCount),
+          );
+          const sourceIndex = repeatPeriod ? column % repeatPeriod : proportional;
+          const source = sourceCells[sourceIndex] || this.defaultCell();
+          return {
+            ...source,
+            text: laneNumbered ? String(column + 1) : source.text,
+            colspan: 1,
+            rowspan: 1,
+            merged_into: null,
+            merged_into_row: null,
+            borders: { ...source.borders },
+          };
+        });
+      });
+
+      const occupied = new Set();
+      for (const merge of mergeAnchors) {
+        const endRow = Math.min(rows.length, merge.rowIndex + merge.cell.rowspan);
+        const startColumn = Math.max(
+          0,
+          Math.min(newLaneCount - 1, Math.round(merge.column * newLaneCount / oldLaneCount)),
+        );
+        const endColumn = Math.max(
+          startColumn + 1,
+          Math.min(
+            newLaneCount,
+            Math.round((merge.column + merge.cell.colspan) * newLaneCount / oldLaneCount),
+          ),
+        );
+        const coordinates = [];
+        for (let rowIndex = merge.rowIndex; rowIndex < endRow; rowIndex += 1) {
+          for (let column = startColumn; column < endColumn; column += 1) {
+            coordinates.push(`${rowIndex}:${column}`);
+          }
+        }
+        if (coordinates.some((coordinate) => occupied.has(coordinate))) continue;
+        coordinates.forEach((coordinate) => occupied.add(coordinate));
+
+        const anchorRow = rows[merge.rowIndex];
+        const anchor = anchorRow.cells[startColumn];
+        Object.assign(anchor, {
+          ...merge.cell,
+          colspan: endColumn - startColumn,
+          rowspan: endRow - merge.rowIndex,
+          merged_into: null,
+          merged_into_row: null,
+          borders: { ...merge.cell.borders },
+        });
+        for (let rowIndex = merge.rowIndex; rowIndex < endRow; rowIndex += 1) {
+          for (let column = startColumn; column < endColumn; column += 1) {
+            if (rowIndex === merge.rowIndex && column === startColumn) continue;
+            const covered = rows[rowIndex].cells[column];
+            covered.merged_into = startColumn;
+            covered.merged_into_row = anchorRow.row_id;
+          }
+        }
+      }
+
+      if (this.selectedCell) {
+        this.selectedCell.col = Math.min(this.selectedCell.col, newLaneCount - 1);
+      }
+      if (this.selectionAnchor) {
+        this.selectionAnchor.col = Math.min(this.selectionAnchor.col, newLaneCount - 1);
+      }
+      this.renderLabelRows();
+      this.showLabelStatus(
+        `Template adapted from ${oldLaneCount} to ${newLaneCount} lanes.`,
+        "success",
+      );
+    }
+
+    repeatingCellPeriod(cells) {
+      if (cells.some((cell) => cell.merged_into !== null || cell.colspan !== 1 || cell.rowspan !== 1)) {
+        return null;
+      }
+      const signatures = cells.map((cell) => JSON.stringify({
+        text: cell.text,
+        align: cell.align,
+        vertical_align: cell.vertical_align,
+        font_size: cell.font_size,
+        bold: cell.bold,
+        italic: cell.italic,
+        underline: cell.underline,
+        rotation: cell.rotation,
+        border_extension: cell.border_extension,
+        borders: cell.borders,
+      }));
+      for (let period = 1; period <= Math.floor(cells.length / 2); period += 1) {
+        if (signatures.every((signature, index) => signature === signatures[index % period])) {
+          return period;
+        }
+      }
+      return null;
     }
 
     renderLabelRows() {
@@ -719,30 +1256,35 @@
         rowElement.append(nameElement);
 
         row.cells.forEach((cell, column) => {
-          if (cell.merged_into !== null) return;
-          const cellElement = document.createElement("div");
-          cellElement.className = "label-cell";
-          cellElement.dataset.rowId = row.row_id;
-          cellElement.dataset.column = String(column);
-          cellElement.dataset.colspan = String(cell.colspan);
+          if (cell.merged_into !== null || cell.rowspan > 1) return;
+          const cellElement = this.createCellElement(row, cell, column);
           cellElement.style.gridColumn = `${column + 1} / span ${cell.colspan}`;
-          cellElement.contentEditable = "false";
-          cellElement.tabIndex = 0;
-          cellElement.setAttribute("role", "gridcell");
-          cellElement.setAttribute(
-            "aria-label",
-            cell.colspan > 1
-              ? `${row.name}, lanes ${column + 1} through ${column + cell.colspan}`
-              : `${row.name}, lane ${column + 1}`,
-          );
-          cellElement.textContent = cell.text;
-          this.applyCellElementStyle(cellElement, cell, row, column);
           rowElement.append(cellElement);
         });
         overlay.append(rowElement);
       }
       this.positionLabelRows();
       this.updateCellSelection();
+    }
+
+    createCellElement(row, cell, column) {
+      const cellElement = document.createElement("div");
+      cellElement.className = "label-cell";
+      cellElement.dataset.rowId = row.row_id;
+      cellElement.dataset.column = String(column);
+      cellElement.dataset.colspan = String(cell.colspan);
+      cellElement.dataset.rowspan = String(cell.rowspan || 1);
+      cellElement.contentEditable = "false";
+      cellElement.tabIndex = 0;
+      cellElement.setAttribute("role", "gridcell");
+      const laneDescription = cell.colspan > 1
+        ? `lanes ${column + 1} through ${column + cell.colspan}`
+        : `lane ${column + 1}`;
+      const rowDescription = cell.rowspan > 1 ? `, spanning ${cell.rowspan} rows` : "";
+      cellElement.setAttribute("aria-label", `${row.name}, ${laneDescription}${rowDescription}`);
+      cellElement.textContent = cell.text;
+      this.applyCellElementStyle(cellElement, cell, row, column);
+      return cellElement;
     }
 
     applyCellElementStyle(element, cell, row, column) {
@@ -770,7 +1312,7 @@
     }
 
     positionLabelRows() {
-      for (const image of this.images) {
+      for (const image of this.surfaces()) {
         const grid = this.laneGrids.get(image.image_id);
         if (!grid) continue;
         const left = image.x + image.width * grid.left;
@@ -798,6 +1340,109 @@
           belowOffset += row.height;
         }
       }
+      this.renderVerticalMergedCells();
+      this.renderBorderExtensions();
+    }
+
+    renderVerticalMergedCells() {
+      const overlay = document.getElementById("label_grid_overlay");
+      if (!overlay) return;
+      overlay.querySelectorAll(".vertical-merged-cell").forEach((cell) => cell.remove());
+      for (const image of this.surfaces()) {
+        const grid = this.laneGrids.get(image.image_id);
+        if (!grid) continue;
+        const rows = this.labelRows.filter((row) => row.image_id === image.image_id);
+        rows.forEach((row, rowIndex) => {
+          row.cells.forEach((cell, column) => {
+            if (cell.merged_into !== null || Number(cell.rowspan || 1) <= 1) return;
+            const spannedRows = rows.slice(rowIndex, rowIndex + cell.rowspan);
+            const rowElements = spannedRows
+              .map((candidate) => overlay.querySelector(`[data-label-row="${candidate.row_id}"]`))
+              .filter(Boolean);
+            if (rowElements.length !== cell.rowspan) return;
+            const tops = rowElements.map((element) => Number.parseFloat(element.style.top || "0"));
+            const bottoms = rowElements.map(
+              (element, index) => tops[index] + spannedRows[index].height,
+            );
+            const left = image.x + image.width * grid.left;
+            const width = image.width * (grid.right - grid.left);
+            const cellElement = this.createCellElement(row, cell, column);
+            cellElement.classList.add("vertical-merged-cell");
+            cellElement.style.left = `${left + width * column / row.cells.length}px`;
+            cellElement.style.top = `${Math.min(...tops)}px`;
+            cellElement.style.width = `${width * cell.colspan / row.cells.length}px`;
+            cellElement.style.height = `${Math.max(...bottoms) - Math.min(...tops)}px`;
+            overlay.append(cellElement);
+          });
+        });
+      }
+    }
+
+    renderBorderExtensions() {
+      const overlay = document.getElementById("label_grid_overlay");
+      if (!overlay) return;
+      overlay.querySelectorAll(".border-extension-line").forEach((line) => line.remove());
+      for (const row of this.labelRows) {
+        const image = this.surfaces().find((candidate) => candidate.image_id === row.image_id);
+        const grid = image ? this.laneGrids.get(image.image_id) : null;
+        const rowElement = overlay.querySelector(`[data-label-row="${row.row_id}"]`);
+        if (!image || !grid || !rowElement) continue;
+        const rowTop = Number.parseFloat(rowElement.style.top || "0");
+        const left = image.x + image.width * grid.left;
+        const width = image.width * (grid.right - grid.left);
+        row.cells.forEach((cell, column) => {
+          if (cell.merged_into !== null || Number(cell.border_extension || 0) <= 0) return;
+          const extension = Math.min(500, Number(cell.border_extension));
+          const rightCell = row.cells[column + cell.colspan - 1];
+          const edges = [];
+          if (cell.borders.left) edges.push(column);
+          if (rightCell.borders.right) edges.push(column + cell.colspan);
+          for (const edge of new Set(edges)) {
+            const line = document.createElement("div");
+            line.className = "border-extension-line";
+            line.dataset.rowId = row.row_id;
+            line.dataset.columnEdge = String(edge);
+            line.style.left = `${left + width * edge / row.cells.length}px`;
+            let blockTop = rowTop;
+            let blockBottom = rowTop + row.height;
+            if (cell.rowspan > 1) {
+              const rows = this.labelRows.filter((candidate) => candidate.image_id === row.image_id);
+              const rowIndex = rows.findIndex((candidate) => candidate.row_id === row.row_id);
+              const elements = rows.slice(rowIndex, rowIndex + cell.rowspan)
+                .map((candidate) => overlay.querySelector(`[data-label-row="${candidate.row_id}"]`))
+                .filter(Boolean);
+              if (elements.length === cell.rowspan) {
+                const tops = elements.map((element) => Number.parseFloat(element.style.top || "0"));
+                blockTop = Math.min(...tops);
+                blockBottom = Math.max(
+                  ...elements.map((element, index) => tops[index] + rows[rowIndex + index].height),
+                );
+              }
+            }
+            line.style.top = `${row.position === "above" ? blockBottom : blockTop - extension}px`;
+            line.style.height = `${extension}px`;
+            overlay.append(line);
+          }
+        });
+      }
+    }
+
+    ensureLabelRowsFit(image) {
+      if (!image) return;
+      const rows = this.labelRows.filter((row) => row.image_id === image.image_id);
+      const aboveRows = rows.filter((row) => row.position === "above");
+      const belowRows = rows.filter((row) => row.position === "below");
+      const aboveHeight = aboveRows.reduce((total, row) => total + row.height, 0) + (aboveRows.length ? 6 : 0);
+      const belowHeight = belowRows.reduce((total, row) => total + row.height, 0) + (belowRows.length ? 6 : 0);
+      const availableHeight = Math.max(MIN_IMAGE_SIZE, this.stageHeight - aboveHeight - belowHeight - 16);
+      if (image.height > availableHeight) {
+        const scale = availableHeight / image.height;
+        image.height = Math.round(image.height * scale);
+        image.width = Math.round(image.width * scale);
+      }
+      const minimumY = 8 + aboveHeight;
+      const maximumY = Math.max(minimumY, this.stageHeight - 8 - belowHeight - image.height);
+      image.y = Math.round(Math.max(minimumY, Math.min(maximumY, image.y)));
     }
 
     handleCellPointerDown(event) {
@@ -891,10 +1536,136 @@
       if (cell && this.editingCell) this.finishEditing(true);
     }
 
+    handleCellPaste(event) {
+      const cell = event.target.closest(".label-cell");
+      const text = event.clipboardData?.getData("text/plain");
+      if (!cell || text === undefined) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.finishEditing(true);
+      this.selectCell(cell.dataset.rowId, Number(cell.dataset.column), false);
+      this.pasteTabularText(text);
+    }
+
+    pasteTabularText(text) {
+      if (!this.selectedCell) return;
+      const normalized = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const lines = normalized.split("\n");
+      while (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+      const matrix = lines.map((line) => line.split("\t").map((value) => value.replace(/[\r\n]+/g, " ")));
+      const width = Math.max(...matrix.map((line) => line.length));
+      const imageRows = this.labelRows.filter((row) => row.image_id === this.selectedId);
+      const startRowIndex = imageRows.findIndex((row) => row.row_id === this.selectedCell.rowId);
+      const startColumn = this.selectedCell.col;
+      if (startRowIndex < 0 || width < 1) return;
+      if (startColumn + width > imageRows[startRowIndex].cells.length) {
+        this.showLabelStatus(
+          `Paste needs ${width} columns, but only ${imageRows[startRowIndex].cells.length - startColumn} lanes remain.`,
+          "error",
+        );
+        this.focusSelectedCell();
+        return;
+      }
+
+      for (let rowOffset = 0; rowOffset < matrix.length; rowOffset += 1) {
+        const row = imageRows[startRowIndex + rowOffset];
+        if (!row) continue;
+        for (let columnOffset = 0; columnOffset < matrix[rowOffset].length; columnOffset += 1) {
+          const cell = row.cells[startColumn + columnOffset];
+          if (cell.merged_into !== null || cell.colspan !== 1) {
+            this.showLabelStatus("Unmerge the destination cells before pasting tabular data.", "error");
+            this.focusSelectedCell();
+            return;
+          }
+        }
+      }
+
+      const startRow = imageRows[startRowIndex];
+      while (imageRows.length < startRowIndex + matrix.length) {
+        const newRow = this.createLabelRow(this.selectedId, startRow.position, startRow.cells.length);
+        this.labelRows.push(newRow);
+        imageRows.push(newRow);
+      }
+      let populated = 0;
+      matrix.forEach((values, rowOffset) => {
+        const row = imageRows[startRowIndex + rowOffset];
+        values.forEach((value, columnOffset) => {
+          row.cells[startColumn + columnOffset].text = value;
+          populated += 1;
+        });
+      });
+      this.selectionAnchor = { rowId: startRow.row_id, col: startColumn };
+      const lastRow = imageRows[startRowIndex + matrix.length - 1];
+      this.selectedCell = { rowId: lastRow.row_id, col: startColumn + width - 1 };
+      this.ensureLabelRowsFit(this.selectedImage());
+      this.renderLabelRows();
+      this.draw();
+      this.updateProperties();
+      this.focusSelectedCell();
+      this.syncState();
+      this.showLabelStatus(
+        `Pasted ${populated} cell${populated === 1 ? "" : "s"} across ${matrix.length} row${matrix.length === 1 ? "" : "s"}.`,
+        "success",
+      );
+    }
+
+    fillLaneNumbers() {
+      const row = this.selectedRow();
+      if (!row) return;
+      if (row.cells.some((cell) => cell.merged_into !== null || cell.colspan !== 1)) {
+        this.showLabelStatus("Unmerge this row before filling lane numbers.", "error");
+        return;
+      }
+      row.cells.forEach((cell, column) => { cell.text = String(column + 1); });
+      this.selectionAnchor = { rowId: row.row_id, col: 0 };
+      this.selectedCell = { rowId: row.row_id, col: row.cells.length - 1 };
+      this.renderLabelRows();
+      this.updateProperties();
+      this.focusSelectedCell();
+      this.syncState();
+      this.showLabelStatus(`Filled lane numbers 1–${row.cells.length}.`, "success");
+    }
+
+    repeatSelectedPattern() {
+      const bounds = this.selectionBounds();
+      if (!bounds || bounds.top !== bounds.bottom) {
+        this.showLabelStatus("Select a pattern within one row before repeating it.", "error");
+        return;
+      }
+      const row = bounds.rows[bounds.top];
+      if (row.cells.some((cell) => cell.merged_into !== null || cell.colspan !== 1)) {
+        this.showLabelStatus("Unmerge this row before repeating a pattern.", "error");
+        return;
+      }
+      const pattern = row.cells.slice(bounds.left, bounds.right + 1).map((cell) => cell.text);
+      if (!pattern.some((value) => value !== "")) {
+        this.showLabelStatus("Enter at least one pattern value before repeating it.", "error");
+        return;
+      }
+      row.cells.forEach((cell, column) => { cell.text = pattern[column % pattern.length]; });
+      this.selectionAnchor = { rowId: row.row_id, col: 0 };
+      this.selectedCell = { rowId: row.row_id, col: row.cells.length - 1 };
+      this.renderLabelRows();
+      this.updateProperties();
+      this.focusSelectedCell();
+      this.syncState();
+      this.showLabelStatus(`Repeated a ${pattern.length}-cell pattern across ${row.cells.length} lanes.`, "success");
+    }
+
+    showLabelStatus(message, type = "") {
+      const status = document.getElementById("label_action_status");
+      if (!status) return;
+      status.textContent = message;
+      status.classList.toggle("is-success", type === "success");
+      status.classList.toggle("is-error", type === "error");
+    }
+
     selectCell(rowId, column, focus = true, extend = false) {
-      const row = this.labelRows.find((candidate) => candidate.row_id === rowId);
-      if (!row || !row.cells[column]) return;
-      column = row.cells[column].merged_into ?? column;
+      const resolved = this.resolveCellAnchor(rowId, column);
+      if (!resolved) return;
+      const { row } = resolved;
+      rowId = row.row_id;
+      column = resolved.column;
       this.selectedId = row.image_id;
       this.selectedCell = { rowId, col: column };
       if (!extend || !this.selectionAnchor) this.selectionAnchor = { ...this.selectedCell };
@@ -902,6 +1673,19 @@
       this.updateProperties();
       this.updateCellSelection();
       if (focus) this.focusSelectedCell();
+    }
+
+    resolveCellAnchor(rowId, column) {
+      const row = this.labelRows.find((candidate) => candidate.row_id === rowId);
+      const cell = row?.cells[column];
+      if (!row || !cell) return null;
+      if (cell.merged_into === null) return { row, column, cell };
+      const anchorRow = this.labelRows.find(
+        (candidate) => candidate.row_id === (cell.merged_into_row || row.row_id),
+      );
+      const anchor = anchorRow?.cells[cell.merged_into];
+      if (!anchorRow || !anchor) return null;
+      return { row: anchorRow, column: cell.merged_into, cell: anchor };
     }
 
     beginCellEdit(rowId, column, initialText = null) {
@@ -941,8 +1725,8 @@
       const rows = this.labelRows.filter((row) => row.image_id === this.selectedId);
       const rowIndex = rows.findIndex((row) => row.row_id === this.selectedCell.rowId);
       if (rowIndex < 0) return;
-      let nextRow = rowIndex + vertical;
       const currentCell = rows[rowIndex].cells[this.selectedCell.col];
+      let nextRow = rowIndex + (vertical > 0 ? currentCell.rowspan || 1 : vertical);
       let nextColumn = this.selectedCell.col + (horizontal > 0 ? currentCell.colspan : horizontal);
 
       if (horizontal !== 0) {
@@ -956,8 +1740,8 @@
       }
       nextRow = Math.max(0, Math.min(rows.length - 1, nextRow));
       nextColumn = Math.max(0, Math.min(rows[nextRow].cells.length - 1, nextColumn));
-      nextColumn = rows[nextRow].cells[nextColumn].merged_into ?? nextColumn;
-      this.selectCell(rows[nextRow].row_id, nextColumn, true, extend);
+      const resolved = this.resolveCellAnchor(rows[nextRow].row_id, nextColumn);
+      if (resolved) this.selectCell(resolved.row.row_id, resolved.column, true, extend);
     }
 
     cellElement(rowId, column) {
@@ -975,6 +1759,7 @@
           cell.dataset.rowId,
           Number(cell.dataset.column),
           Number(cell.dataset.colspan || 1),
+          Number(cell.dataset.rowspan || 1),
         );
         cell.classList.toggle("is-selected", selected);
         cell.setAttribute("aria-selected", String(selected));
@@ -987,10 +1772,15 @@
       const anchorRow = rows.findIndex((row) => row.row_id === this.selectionAnchor.rowId);
       const focusRow = rows.findIndex((row) => row.row_id === this.selectedCell.rowId);
       if (anchorRow < 0 || focusRow < 0) return null;
-      const anchorSpan = rows[anchorRow].cells[this.selectionAnchor.col]?.colspan || 1;
-      const focusSpan = rows[focusRow].cells[this.selectedCell.col]?.colspan || 1;
-      const top = Math.min(anchorRow, focusRow);
-      const bottom = Math.max(anchorRow, focusRow);
+      const anchorCell = rows[anchorRow].cells[this.selectionAnchor.col];
+      const focusCell = rows[focusRow].cells[this.selectedCell.col];
+      const anchorSpan = anchorCell?.colspan || 1;
+      const focusSpan = focusCell?.colspan || 1;
+      let top = Math.min(anchorRow, focusRow);
+      let bottom = Math.max(
+        anchorRow + (anchorCell?.rowspan || 1) - 1,
+        focusRow + (focusCell?.rowspan || 1) - 1,
+      );
       let left = Math.min(this.selectionAnchor.col, this.selectedCell.col);
       let right = Math.max(
         this.selectionAnchor.col + anchorSpan - 1,
@@ -999,17 +1789,21 @@
       let expanded = true;
       while (expanded) {
         expanded = false;
-        for (let rowIndex = top; rowIndex <= bottom; rowIndex += 1) {
-          rows[rowIndex].cells.forEach((cell, column) => {
-            if (cell.merged_into !== null || cell.colspan <= 1) return;
+        rows.forEach((row, rowIndex) => {
+          row.cells.forEach((cell, column) => {
+            if (cell.merged_into !== null || (cell.colspan <= 1 && cell.rowspan <= 1)) return;
+            const cellBottom = rowIndex + cell.rowspan - 1;
             const end = column + cell.colspan - 1;
-            if (end >= left && column <= right && (column < left || end > right)) {
+            const intersects = cellBottom >= top && rowIndex <= bottom && end >= left && column <= right;
+            if (intersects && (rowIndex < top || cellBottom > bottom || column < left || end > right)) {
+              top = Math.min(top, rowIndex);
+              bottom = Math.max(bottom, cellBottom);
               left = Math.min(left, column);
               right = Math.max(right, end);
               expanded = true;
             }
           });
-        }
+        });
       }
       return {
         rows,
@@ -1020,12 +1814,13 @@
       };
     }
 
-    selectionIncludes(rowId, column, colspan = 1) {
+    selectionIncludes(rowId, column, colspan = 1, rowspan = 1) {
       const bounds = this.selectionBounds();
       if (!bounds) return false;
       const rowIndex = bounds.rows.findIndex((row) => row.row_id === rowId);
       const end = column + colspan - 1;
-      return rowIndex >= bounds.top && rowIndex <= bounds.bottom && end >= bounds.left && column <= bounds.right;
+      const rowEnd = rowIndex + rowspan - 1;
+      return rowEnd >= bounds.top && rowIndex <= bounds.bottom && end >= bounds.left && column <= bounds.right;
     }
 
     selectedCellEntries() {
@@ -1052,39 +1847,43 @@
       this.syncState();
     }
 
-    normalizeMerges(row) {
-      const anchors = row.cells.map((cell) => cell.merged_into === null ? cell.colspan : 1);
-      for (const cell of row.cells) {
-        cell.colspan = 1;
-        cell.merged_into = null;
-      }
-      for (let column = 0; column < row.cells.length; column += 1) {
-        const span = Math.min(Math.max(1, anchors[column] || 1), row.cells.length - column);
-        row.cells[column].colspan = span;
-        for (let covered = column + 1; covered < column + span; covered += 1) {
-          row.cells[covered].merged_into = column;
+    clearMergesForImage(imageId) {
+      for (const row of this.labelRows.filter((candidate) => candidate.image_id === imageId)) {
+        for (const cell of row.cells) {
+          cell.colspan = 1;
+          cell.rowspan = 1;
+          cell.merged_into = null;
+          cell.merged_into_row = null;
         }
-        column += span - 1;
       }
     }
 
     selectedMergeAnchors() {
       const anchors = new Map();
       for (const { row, column, cell } of this.selectedCellEntries()) {
-        const anchorColumn = cell.merged_into ?? column;
-        const anchor = row.cells[anchorColumn];
-        if (anchor?.colspan > 1) anchors.set(`${row.row_id}:${anchorColumn}`, { row, column: anchorColumn, cell: anchor });
+        const resolved = this.resolveCellAnchor(row.row_id, column);
+        if (!resolved) continue;
+        const { row: anchorRow, column: anchorColumn, cell: anchor } = resolved;
+        if (anchor.colspan > 1 || anchor.rowspan > 1) {
+          anchors.set(
+            `${anchorRow.row_id}:${anchorColumn}`,
+            { row: anchorRow, column: anchorColumn, cell: anchor },
+          );
+        }
       }
       return Array.from(anchors.values());
     }
 
     canMergeSelection() {
       const bounds = this.selectionBounds();
-      if (!bounds || bounds.top !== bounds.bottom || bounds.left >= bounds.right) return false;
-      const row = bounds.rows[bounds.top];
-      for (let column = bounds.left; column <= bounds.right; column += 1) {
-        const cell = row.cells[column];
-        if (!cell || cell.merged_into !== null || cell.colspan !== 1) return false;
+      if (!bounds || (bounds.top === bounds.bottom && bounds.left === bounds.right)) return false;
+      const rows = bounds.rows.slice(bounds.top, bounds.bottom + 1);
+      if (!rows.length || rows.some((row) => row.position !== rows[0].position)) return false;
+      for (const row of rows) {
+        for (let column = bounds.left; column <= bounds.right; column += 1) {
+          const cell = row.cells[column];
+          if (!cell || cell.merged_into !== null || cell.colspan !== 1 || cell.rowspan !== 1) return false;
+        }
       }
       return true;
     }
@@ -1094,17 +1893,35 @@
       const existing = this.selectedMergeAnchors();
       if (existing.length) {
         for (const { row, column, cell } of existing) {
-          const end = Math.min(row.cells.length, column + cell.colspan);
+          const rows = this.labelRows.filter((candidate) => candidate.image_id === row.image_id);
+          const rowIndex = rows.findIndex((candidate) => candidate.row_id === row.row_id);
+          const endRow = Math.min(rows.length, rowIndex + cell.rowspan);
+          const endColumn = Math.min(row.cells.length, column + cell.colspan);
+          for (let coveredRow = rowIndex; coveredRow < endRow; coveredRow += 1) {
+            for (let coveredColumn = column; coveredColumn < endColumn; coveredColumn += 1) {
+              const covered = rows[coveredRow].cells[coveredColumn];
+              covered.colspan = 1;
+              covered.rowspan = 1;
+              covered.merged_into = null;
+              covered.merged_into_row = null;
+            }
+          }
           cell.colspan = 1;
-          for (let covered = column + 1; covered < end; covered += 1) row.cells[covered].merged_into = null;
+          cell.rowspan = 1;
         }
       } else if (this.canMergeSelection()) {
         const bounds = this.selectionBounds();
         const row = bounds.rows[bounds.top];
         const anchor = row.cells[bounds.left];
         anchor.colspan = bounds.right - bounds.left + 1;
-        for (let column = bounds.left + 1; column <= bounds.right; column += 1) {
-          row.cells[column].merged_into = bounds.left;
+        anchor.rowspan = bounds.bottom - bounds.top + 1;
+        for (let rowIndex = bounds.top; rowIndex <= bounds.bottom; rowIndex += 1) {
+          for (let column = bounds.left; column <= bounds.right; column += 1) {
+            if (rowIndex === bounds.top && column === bounds.left) continue;
+            const covered = bounds.rows[rowIndex].cells[column];
+            covered.merged_into = bounds.left;
+            covered.merged_into_row = row.row_id;
+          }
         }
         this.selectedCell = { rowId: row.row_id, col: bounds.left };
         this.selectionAnchor = { ...this.selectedCell };
@@ -1175,7 +1992,7 @@
       const entries = this.selectedCellEntries();
       const active = entries.length > 0;
       const focused = this.selectedRow()?.cells[this.selectedCell?.col] || null;
-      for (const id of ["align_left", "align_center", "align_right", "cell_bold", "cell_italic", "cell_underline", "cell_font_size", "cell_rotation", "cell_border_preset", "cell_borders", "rotate_object"]) {
+      for (const id of ["align_left", "align_center", "align_right", "cell_bold", "cell_italic", "cell_underline", "cell_font_size", "cell_rotation", "cell_border_preset", "cell_border_extension", "cell_borders", "rotate_object"]) {
         document.getElementById(id)?.toggleAttribute("disabled", !active);
       }
       const merge = document.getElementById("merge_cells");
@@ -1195,13 +2012,28 @@
       const fontSize = document.getElementById("cell_font_size");
       const rotation = document.getElementById("cell_rotation");
       const borders = document.getElementById("cell_border_preset");
+      const borderExtension = document.getElementById("cell_border_extension");
       if (fontSize && focused) fontSize.value = String(focused.font_size);
       if (rotation && focused) rotation.value = String(focused.rotation);
+      if (borderExtension && focused) {
+        borderExtension.value = String(focused.border_extension || 0);
+      }
       if (borders && active) {
         const everyAll = entries.every(({ cell }) => Object.values(cell.borders).every(Boolean));
         const everyNone = entries.every(({ cell }) => Object.values(cell.borders).every((value) => !value));
         borders.value = everyAll ? "all" : everyNone ? "none" : "custom";
       }
+    }
+
+    updateProductivityControls() {
+      const row = this.selectedRow();
+      const bounds = this.selectionBounds();
+      document.getElementById("fill_lane_numbers")?.toggleAttribute("disabled", !row);
+      document.getElementById("repeat_pattern")?.toggleAttribute(
+        "disabled",
+        !(row && bounds && bounds.top === bounds.bottom),
+      );
+      if (!row) this.showLabelStatus("Select a cell to use labeling helpers.");
     }
 
     updateRowControls(image) {
@@ -1228,6 +2060,15 @@
         schema_version: SCHEMA_VERSION,
         canvas: { width: this.stageWidth, height: this.stageHeight },
         images: this.images.map((image) => ({ ...image })),
+        template_frame: this.templateFrame
+          ? {
+            image_id: this.templateFrame.image_id,
+            x: this.templateFrame.x,
+            y: this.templateFrame.y,
+            width: this.templateFrame.width,
+            height: this.templateFrame.height,
+          }
+          : null,
         lane_grids: Array.from(this.laneGrids.values(), (grid) => ({
           ...grid,
           boundaries: [...grid.boundaries],
@@ -1239,8 +2080,26 @@
       };
     }
 
-    syncState() {
+    syncState(preserveDeleteHistory = false) {
+      if (this.isLoadingProject) return;
+      if (!preserveDeleteHistory && !this.isApplyingHistory) {
+        this.undoStack = [];
+        this.redoStack = [];
+        this.updateHistoryControls();
+      }
+      this.setSaveStatus({ label: "Editing…", state: "editing" });
+      window.FigForgeRecovery?.scheduleDraft(
+        document.getElementById("figure_name")?.value,
+        this.state(),
+      );
       if (window.Shiny?.setInputValue) window.Shiny.setInputValue("canvas_state", this.state(), { priority: "event" });
+    }
+
+    setSaveStatus(payload) {
+      const label = document.querySelector(".save-indicator-label");
+      const indicator = document.querySelector(".save-indicator");
+      if (label) label.textContent = payload?.label || "Local draft";
+      if (indicator) indicator.dataset.state = payload?.state || "draft";
     }
 
     showCanvasError(message) {
@@ -1264,6 +2123,8 @@
   function registerMessageHandler() {
     if (messageHandlerRegistered || !window.Shiny?.addCustomMessageHandler) return;
     window.Shiny.addCustomMessageHandler("figforge:add-asset", (asset) => initialize()?.addAsset(asset));
+    window.Shiny.addCustomMessageHandler("figforge:load-project", (project) => initialize()?.loadProject(project));
+    window.Shiny.addCustomMessageHandler("figforge:save-status", (status) => initialize()?.setSaveStatus(status));
     messageHandlerRegistered = true;
   }
 

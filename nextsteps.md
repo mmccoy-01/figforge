@@ -1086,6 +1086,7 @@ Codex should work in this order.
 - [x] Move image.
 - [x] Resize image with aspect ratio preserved.
 - [x] Delete image.
+- [x] Undo/redo image deletion with toolbar and keyboard shortcuts.
 - [x] Serialize canvas image state.
 
 ## Phase 3 — Lane Guides
@@ -1104,6 +1105,7 @@ Codex should work in this order.
 - [x] Render one cell per lane.
 - [x] Edit cells.
 - [x] Keyboard navigation.
+- [x] Scope Backspace/Delete to cell editing and clearing.
 - [x] Delete row.
 - [x] Rename row.
 - [x] Row position above/below image.
@@ -1113,7 +1115,9 @@ Codex should work in this order.
 - [x] Multi-cell selection.
 - [x] Merge.
 - [x] Unmerge.
+- [x] Rectangular horizontal and vertical merge/unmerge.
 - [x] Borders.
+- [x] User-length vertical border extensions toward the image.
 - [x] Horizontal alignment.
 - [x] Font size.
 - [x] Bold/italic.
@@ -1122,42 +1126,46 @@ Codex should work in this order.
 
 ## Phase 6 — Clipboard Productivity
 
-- [ ] Paste tab-separated data.
-- [ ] Paste multiline data.
-- [ ] Fill lane numbers.
-- [ ] Repeat selected pattern.
+- [x] Paste tab-separated data.
+- [x] Paste multiline data.
+- [x] Fill lane numbers.
+- [x] Repeat selected pattern.
 
 ## Phase 7 — Project Persistence
 
-- [ ] Define project JSON schema.
-- [ ] SQLite database.
-- [ ] Save project.
-- [ ] Autosave.
-- [ ] Open project.
-- [ ] My Figures view.
-- [ ] Project thumbnail.
+- [x] Define project JSON schema.
+- [x] SQLite database for local single-user runs.
+- [x] Save project.
+- [x] Autosave mutable drafts.
+- [x] Open local and portable projects.
+- [x] My Figures view for locally saved drafts.
+- [x] Project thumbnail.
+- [x] Portable `.figforge` bundle for temporary-filesystem deployments.
+- [x] Same-browser IndexedDB crash/idle recovery with immutable image blobs.
+- [x] Restore/discard workflow that rebuilds assets in a fresh Shiny session.
 
 ## Phase 8 — Revision History
 
-- [ ] Save Version.
-- [ ] Optional version note.
-- [ ] Revision list.
-- [ ] Revision preview.
-- [ ] Restore old revision as new revision.
+- [x] Save Version.
+- [x] Optional version note.
+- [x] Revision list.
+- [x] Read-only image and label preview.
+- [x] Restore old revision as new revision while preserving newer versions.
 
 ## Phase 9 — Export
 
-- [ ] PNG export.
-- [ ] PDF export.
-- [ ] 300 DPI preset.
-- [ ] 600 DPI preset.
-- [ ] Ensure temporary guides are excluded.
+- [x] PNG export.
+- [x] TIFF export.
+- [x] PDF export.
+- [x] 300 DPI preset.
+- [x] 600 DPI preset.
+- [x] Ensure temporary guides, selection outlines, and handles are excluded.
 
 ## Phase 10 — Templates
 
-- [ ] Save current structure as template.
-- [ ] New project from template.
-- [ ] Adapt template to requested lane count.
+- [x] Save an image-independent structure as a portable `.figforge` template.
+- [x] Open a `.figforge` template and attach an image without losing its layout.
+- [x] Adapt template patterns, formatting, and merged groups to 1–30 lanes.
 
 Only after all of the above:
 

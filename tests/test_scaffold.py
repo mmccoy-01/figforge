@@ -13,11 +13,15 @@ def test_required_phase_one_files_exist() -> None:
     required = (
         "app.py",
         "pyproject.toml",
+        "requirements.txt",
         "README.md",
         "figforge/ui/upload_label.py",
         "figforge/ui/quantification.py",
         "figforge/ui/my_figures.py",
+        "figforge/persistence.py",
+        "figforge/export.py",
         "figforge/static/css/app.css",
+        "figforge/static/js/browser_recovery.js",
     )
 
     assert all((ROOT / path).is_file() for path in required)
@@ -60,12 +64,32 @@ def test_ui_builds_with_shiny() -> None:
     assert 'id="cell_font_size"' in rendered
     assert 'id="cell_rotation"' in rendered
     assert 'id="cell_border_preset"' in rendered
+    assert 'id="cell_border_extension"' in rendered
     assert 'id="align_left"' in rendered
     assert 'id="align_center"' in rendered
     assert 'id="align_right"' in rendered
     assert 'id="cell_bold"' in rendered
     assert 'id="cell_italic"' in rendered
     assert 'id="cell_underline"' in rendered
+    assert 'id="fill_lane_numbers"' in rendered
+    assert 'id="repeat_pattern"' in rendered
+    assert 'id="label_action_status"' in rendered
+    assert 'id="save_project"' in rendered
+    assert 'id="save_version"' in rendered
+    assert 'id="export_figure"' in rendered
+    assert 'id="download_project"' in rendered
+    assert 'id="project_upload"' in rendered
+    assert 'id="start_blank_template"' in rendered
+    assert 'id="new_project"' in rendered
+    assert 'id="project_browser"' in rendered
+    assert 'id="revision_browser"' in rendered
+    assert 'id="undo_action"' in rendered
+    assert 'id="redo_action"' in rendered
+    assert 'id="browser_recovery_banner"' in rendered
+    assert 'id="restore_browser_draft"' in rendered
+    assert 'id="discard_browser_draft"' in rendered
+    assert 'id="recovery_upload"' in rendered
+    assert 'id="browser_recovery_status"' in rendered
 
 
 def test_browser_and_server_canvas_schema_versions_match() -> None:

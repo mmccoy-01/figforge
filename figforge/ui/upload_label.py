@@ -7,6 +7,42 @@ def upload_label_panel():
     """Return the three-column figure editing workspace."""
 
     return ui.tags.section(
+        ui.tags.section(
+            ui.tags.div(
+                ui.tags.strong("Browser recovery is available"),
+                ui.tags.span(id="browser_recovery_description"),
+                class_="browser-recovery-copy",
+            ),
+            ui.tags.div(
+                ui.tags.button(
+                    "Restore draft",
+                    id="restore_browser_draft",
+                    type="button",
+                    class_="lane-action lane-action--primary",
+                ),
+                ui.tags.button(
+                    "Discard",
+                    id="discard_browser_draft",
+                    type="button",
+                    class_="lane-action",
+                ),
+                class_="browser-recovery-actions",
+            ),
+            id="browser_recovery_banner",
+            class_="browser-recovery-banner is-hidden",
+            role="status",
+            aria_live="polite",
+        ),
+        ui.tags.div(
+            ui.input_file(
+                "recovery_upload",
+                "",
+                multiple=True,
+                accept=[".png", ".jpg", ".jpeg", ".tif", ".tiff"],
+            ),
+            class_="browser-recovery-upload",
+            aria_hidden="true",
+        ),
         ui.tags.div(
             _asset_panel(),
             _canvas_panel(),
@@ -29,7 +65,6 @@ def _asset_panel():
                 type="text",
                 value="Untitled figure",
                 class_="text-field",
-                disabled=True,
             ),
             class_="field-group",
         ),
@@ -56,7 +91,48 @@ def _asset_panel():
                 button_label="+ Upload images",
                 placeholder="PNG, JPEG, or TIFF",
             ),
+            ui.tags.button(
+                "Start without image",
+                id="start_blank_template",
+                type="button",
+                class_="wide-button blank-template-button",
+                title="Create a lane and label template before attaching an image",
+            ),
             class_="upload-control",
+        ),
+        ui.tags.div(
+            ui.tags.div("Project file", class_="section-label"),
+            ui.tags.p(
+                "Download a project or reusable template, with or without an image.",
+                class_="portable-project-help",
+            ),
+            ui.tags.div(
+                ui.download_button(
+                    "download_project",
+                    "Download project",
+                    class_="wide-button portable-download",
+                ),
+                ui.tags.div(
+                    ui.input_file(
+                        "project_upload",
+                        "",
+                        multiple=False,
+                        accept=[".figforge", "application/zip"],
+                        button_label="Open project",
+                        placeholder=".figforge",
+                    ),
+                    class_="upload-control project-upload-control",
+                ),
+                class_="portable-project-actions",
+            ),
+            ui.tags.div(
+                "Browser recovery initializes after the first edit",
+                id="browser_recovery_status",
+                class_="browser-recovery-status",
+                role="status",
+                aria_live="polite",
+            ),
+            class_="portable-project",
         ),
         class_="side-panel asset-panel",
         aria_label="Project assets",
@@ -84,8 +160,8 @@ def _canvas_panel():
             ui.tags.div(
                 ui.tags.div("▧", class_="canvas-empty-icon", aria_hidden="true"),
                 ui.tags.h2("Your figure canvas is ready"),
-                ui.tags.p("Upload an image to begin assembling a publication-ready figure."),
-                ui.tags.span("PNG, JPEG, and TIFF", class_="status-chip"),
+                ui.tags.p("Upload an image or start a blank template."),
+                ui.tags.span("PNG, JPEG, TIFF, or template", class_="status-chip"),
                 class_="canvas-empty-state",
                 id="canvas_empty_state",
             ),
@@ -123,6 +199,7 @@ def _properties_panel():
             ),
             _property_group("Lane Guides", _lane_guide_controls()),
             _property_group("Label Rows", _label_row_controls()),
+            _property_group("Productivity", _productivity_controls()),
             _property_group(
                 "Alignment",
                 ui.tags.div(
@@ -177,22 +254,43 @@ def _properties_panel():
             ),
             _property_group(
                 "Borders",
-                ui.tags.label(
-                    ui.tags.span("Border preset", class_="visually-hidden"),
-                    ui.tags.select(
-                        ui.tags.option("All borders", value="all", selected=True),
-                        ui.tags.option("No borders", value="none"),
-                        ui.tags.option("Outer border", value="outer"),
-                        ui.tags.option("Top border", value="top"),
-                        ui.tags.option("Bottom border", value="bottom"),
-                        ui.tags.option("Left border", value="left"),
-                        ui.tags.option("Right border", value="right"),
-                        ui.tags.option("Custom", value="custom", disabled=True),
-                        id="cell_border_preset",
-                        disabled=True,
-                        aria_label="Border preset",
+                ui.tags.div(
+                    ui.tags.label(
+                        ui.tags.span("Border preset", class_="visually-hidden"),
+                        ui.tags.select(
+                            ui.tags.option("All borders", value="all", selected=True),
+                            ui.tags.option("No borders", value="none"),
+                            ui.tags.option("Outer border", value="outer"),
+                            ui.tags.option("Top border", value="top"),
+                            ui.tags.option("Bottom border", value="bottom"),
+                            ui.tags.option("Left border", value="left"),
+                            ui.tags.option("Right border", value="right"),
+                            ui.tags.option("Custom", value="custom", disabled=True),
+                            id="cell_border_preset",
+                            disabled=True,
+                            aria_label="Border preset",
+                        ),
+                        class_="select-placeholder",
                     ),
-                    class_="select-placeholder",
+                    ui.tags.label(
+                        ui.tags.span("Extend toward image (px)"),
+                        ui.tags.input(
+                            id="cell_border_extension",
+                            type="number",
+                            min="0",
+                            max="500",
+                            step="1",
+                            value="0",
+                            disabled=True,
+                            aria_label="Vertical border extension length",
+                        ),
+                        class_="label-row-field border-extension-field",
+                    ),
+                    ui.tags.p(
+                        "Projects selected left/right borders toward the image.",
+                        class_="lane-guide-help",
+                    ),
+                    class_="property-stack",
                 ),
             ),
             class_="properties-body",
@@ -234,13 +332,27 @@ def _toolbar():
         ),
         ui.tags.div(class_="toolbar-divider", aria_hidden="true"),
         ui.tags.div(
-            ui.tags.button("↶ Undo", type="button", class_="history-button", disabled=True),
-            ui.tags.button("↷ Redo", type="button", class_="history-button", disabled=True),
+            ui.tags.button(
+                "↶ Undo",
+                id="undo_action",
+                type="button",
+                class_="history-button",
+                disabled=True,
+                title="Undo (Ctrl/Cmd+Z)",
+            ),
+            ui.tags.button(
+                "↷ Redo",
+                id="redo_action",
+                type="button",
+                class_="history-button",
+                disabled=True,
+                title="Redo (Ctrl/Cmd+Shift+Z)",
+            ),
             class_="history-group",
         ),
         ui.tags.div(
             ui.tags.span(class_="save-indicator-dot", aria_hidden="true"),
-            ui.tags.span("Local draft", class_="save-indicator-label"),
+            ui.tags.span("Draft", class_="save-indicator-label"),
             class_="save-indicator",
         ),
         class_="editor-toolbar",
@@ -330,7 +442,8 @@ def _lane_guide_controls():
         ),
         ui.tags.p(
             "Drag the stronger left and right guide edges to align the grid. "
-            "The scientific image is never stretched.",
+            "The scientific image is never stretched. On a blank template, "
+            "changing the lane count adapts patterns, formatting, and merged groups.",
             class_="lane-guide-help",
         ),
         class_="lane-guide-controls",
@@ -417,6 +530,41 @@ def _compact_fields(*fields: tuple[str, str]):
             for label, element_id in fields
         ],
         class_="compact-fields",
+    )
+
+
+def _productivity_controls():
+    return ui.tags.div(
+        ui.tags.div(
+            ui.tags.button(
+                "Fill lane numbers",
+                id="fill_lane_numbers",
+                type="button",
+                class_="lane-action",
+                disabled=True,
+            ),
+            ui.tags.button(
+                "Repeat pattern",
+                id="repeat_pattern",
+                type="button",
+                class_="lane-action lane-action--primary",
+                disabled=True,
+            ),
+            class_="productivity-actions",
+        ),
+        ui.tags.p(
+            "Copy cells from Excel or Google Sheets, select a starting cell, then paste. "
+            "New rows are added when multiline data needs them.",
+            class_="lane-guide-help",
+        ),
+        ui.tags.div(
+            "Select a cell to use labeling helpers.",
+            id="label_action_status",
+            class_="label-action-status",
+            role="status",
+            aria_live="polite",
+        ),
+        class_="productivity-controls",
     )
 
 

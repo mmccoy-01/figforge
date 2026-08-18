@@ -6,7 +6,8 @@ from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
+LEGACY_SCHEMA_VERSIONS = {5, 6}
 MAX_LANES = 30
 VALID_HORIZONTAL_ALIGNMENTS = {"left", "center", "right"}
 VALID_VERTICAL_ALIGNMENTS = {"top", "middle", "bottom"}
@@ -51,6 +52,32 @@ class ImageTransform:
         if image.width <= 0 or image.height <= 0:
             raise ValueError("Displayed image dimensions must be positive")
         return image
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateFrameState:
+    """Image-independent layout surface used by reusable project templates."""
+
+    image_id: str
+    x: float
+    y: float
+    width: float
+    height: float
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> TemplateFrameState:
+        frame = cls(
+            image_id=str(value["image_id"]),
+            x=float(value["x"]),
+            y=float(value["y"]),
+            width=float(value["width"]),
+            height=float(value["height"]),
+        )
+        if not frame.image_id:
+            raise ValueError("Template frame identifier is required")
+        if frame.width <= 0 or frame.height <= 0:
+            raise ValueError("Template frame dimensions must be positive")
+        return frame
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +141,9 @@ class LabelCellState:
 
     text: str = ""
     colspan: int = 1
+    rowspan: int = 1
     merged_into: int | None = None
+    merged_into_row: str | None = None
     align: str = "center"
     vertical_align: str = "middle"
     font_size: int = 12
@@ -122,6 +151,7 @@ class LabelCellState:
     italic: bool = False
     underline: bool = False
     rotation: int = 0
+    border_extension: float = 0
     borders: CellBorders = CellBorders()
 
     @classmethod
@@ -129,8 +159,14 @@ class LabelCellState:
         cell = cls(
             text=str(value.get("text", "")),
             colspan=int(value.get("colspan", 1)),
+            rowspan=int(value.get("rowspan", 1)),
             merged_into=(
                 None if value.get("merged_into") is None else int(value["merged_into"])
+            ),
+            merged_into_row=(
+                None
+                if value.get("merged_into_row") is None
+                else str(value["merged_into_row"])
             ),
             align=str(value.get("align", "center")),
             vertical_align=str(value.get("vertical_align", "middle")),
@@ -139,10 +175,13 @@ class LabelCellState:
             italic=bool(value.get("italic", False)),
             underline=bool(value.get("underline", False)),
             rotation=int(value.get("rotation", 0)),
+            border_extension=float(value.get("border_extension", 0)),
             borders=CellBorders.from_mapping(value.get("borders", {})),
         )
         if cell.colspan < 1 or cell.colspan > MAX_LANES:
             raise ValueError(f"Cell colspan must be between 1 and {MAX_LANES}")
+        if cell.rowspan < 1 or cell.rowspan > MAX_LANES:
+            raise ValueError(f"Cell rowspan must be between 1 and {MAX_LANES}")
         if cell.align not in VALID_HORIZONTAL_ALIGNMENTS:
             raise ValueError("Cell alignment must be left, center, or right")
         if cell.vertical_align not in VALID_VERTICAL_ALIGNMENTS:
@@ -151,6 +190,8 @@ class LabelCellState:
             raise ValueError("Cell font size must be between 6 and 72")
         if cell.rotation not in VALID_ROTATIONS:
             raise ValueError("Cell rotation must be -90, 0, or 90 degrees")
+        if not 0 <= cell.border_extension <= 500:
+            raise ValueError("Cell border extension must be between 0 and 500 pixels")
         return cell
 
 
@@ -182,19 +223,8 @@ class LabelRowState:
         if not 1 <= len(row.cells) <= MAX_LANES:
             raise ValueError(f"Label rows must contain between 1 and {MAX_LANES} cells")
         for index, cell in enumerate(row.cells):
-            if cell.merged_into is None:
-                if index + cell.colspan > len(row.cells):
-                    raise ValueError("Merged cell span exceeds its label row")
-                for covered_index in range(index + 1, index + cell.colspan):
-                    if row.cells[covered_index].merged_into != index:
-                        raise ValueError("Merged cell span must reference its anchor")
-            else:
-                anchor = cell.merged_into
-                if anchor < 0 or anchor >= index:
-                    raise ValueError("Merged cells must reference a preceding anchor")
-                anchor_cell = row.cells[anchor]
-                if anchor_cell.merged_into is not None or anchor + anchor_cell.colspan <= index:
-                    raise ValueError("Merged cell reference is outside its anchor span")
+            if cell.merged_into is None and index + cell.colspan > len(row.cells):
+                raise ValueError("Merged cell span exceeds its label row")
         return row
 
 
@@ -206,6 +236,7 @@ class CanvasState:
     width: float
     height: float
     images: tuple[ImageTransform, ...]
+    template_frame: TemplateFrameState | None
     lane_grids: tuple[LaneGridState, ...]
     label_rows: tuple[LabelRowState, ...]
 
@@ -216,6 +247,7 @@ class CanvasState:
             width=0,
             height=0,
             images=(),
+            template_frame=None,
             lane_grids=(),
             label_rows=(),
         )
@@ -223,11 +255,17 @@ class CanvasState:
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> CanvasState:
         schema_version = int(value.get("schema_version", 0))
-        if schema_version != SCHEMA_VERSION:
+        if schema_version not in {SCHEMA_VERSION, *LEGACY_SCHEMA_VERSIONS}:
             raise ValueError(f"Unsupported canvas schema version: {schema_version}")
 
         canvas = value.get("canvas", {})
         images = tuple(ImageTransform.from_mapping(item) for item in value.get("images", ()))
+        template_mapping = value.get("template_frame")
+        template_frame = (
+            TemplateFrameState.from_mapping(template_mapping)
+            if isinstance(template_mapping, Mapping)
+            else None
+        )
         lane_grids = tuple(
             LaneGridState.from_mapping(item) for item in value.get("lane_grids", ())
         )
@@ -235,6 +273,12 @@ class CanvasState:
             LabelRowState.from_mapping(item) for item in value.get("label_rows", ())
         )
         image_ids = {image.image_id for image in images}
+        if template_frame is not None:
+            if images:
+                raise ValueError("Template frames cannot coexist with attached images")
+            if template_frame.image_id in image_ids:
+                raise ValueError("Template frame identifier must be unique")
+            image_ids.add(template_frame.image_id)
         if any(grid.image_id not in image_ids for grid in lane_grids):
             raise ValueError("Every lane grid must reference an existing canvas image")
         if any(row.image_id not in image_ids for row in label_rows):
@@ -245,20 +289,80 @@ class CanvasState:
             for row in label_rows
         ):
             raise ValueError("Label row cell count must match its image lane grid")
+        cls._validate_label_merges(label_rows)
         return cls(
-            schema_version=schema_version,
+            schema_version=SCHEMA_VERSION,
             width=float(canvas.get("width", 0)),
             height=float(canvas.get("height", 0)),
             images=images,
+            template_frame=template_frame,
             lane_grids=lane_grids,
             label_rows=label_rows,
         )
+
+    @staticmethod
+    def _validate_label_merges(label_rows: tuple[LabelRowState, ...]) -> None:
+        """Validate rectangular horizontal and vertical merge references."""
+
+        image_ids = {row.image_id for row in label_rows}
+        for image_id in image_ids:
+            rows = [row for row in label_rows if row.image_id == image_id]
+            row_indices = {row.row_id: index for index, row in enumerate(rows)}
+            if len(row_indices) != len(rows):
+                raise ValueError("Label row identifiers must be unique per image")
+
+            for row_index, row in enumerate(rows):
+                for column, cell in enumerate(row.cells):
+                    if cell.merged_into is not None:
+                        anchor_row_id = cell.merged_into_row or row.row_id
+                        anchor_row_index = row_indices.get(anchor_row_id)
+                        if anchor_row_index is None:
+                            raise ValueError("Merged cell references an unknown anchor row")
+                        anchor_row = rows[anchor_row_index]
+                        anchor_column = cell.merged_into
+                        if not 0 <= anchor_column < len(anchor_row.cells):
+                            raise ValueError("Merged cell references an invalid anchor column")
+                        anchor = anchor_row.cells[anchor_column]
+                        if anchor.merged_into is not None:
+                            raise ValueError("Merged cell anchor cannot itself be covered")
+                        if not (
+                            anchor_row_index <= row_index < anchor_row_index + anchor.rowspan
+                            and anchor_column <= column < anchor_column + anchor.colspan
+                            and (anchor_row_index != row_index or anchor_column != column)
+                        ):
+                            raise ValueError("Merged cell reference is outside its anchor span")
+                        continue
+
+                    if row_index + cell.rowspan > len(rows):
+                        raise ValueError("Merged cell row span exceeds its label rows")
+                    spanned_rows = rows[row_index : row_index + cell.rowspan]
+                    if any(
+                        candidate.position != row.position
+                        or len(candidate.cells) != len(row.cells)
+                        for candidate in spanned_rows
+                    ):
+                        raise ValueError("Vertical merges must stay within one label position")
+                    for covered_row_index in range(row_index, row_index + cell.rowspan):
+                        covered_row = rows[covered_row_index]
+                        for covered_column in range(column, column + cell.colspan):
+                            if covered_row_index == row_index and covered_column == column:
+                                continue
+                            covered = covered_row.cells[covered_column]
+                            covered_anchor_row = covered.merged_into_row or covered_row.row_id
+                            if (
+                                covered.merged_into != column
+                                or covered_anchor_row != row.row_id
+                            ):
+                                raise ValueError("Merged cell span must reference its anchor")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "canvas": {"width": self.width, "height": self.height},
             "images": [asdict(image) for image in self.images],
+            "template_frame": (
+                asdict(self.template_frame) if self.template_frame is not None else None
+            ),
             "lane_grids": [
                 {**asdict(grid), "boundaries": list(grid.boundaries)}
                 for grid in self.lane_grids
