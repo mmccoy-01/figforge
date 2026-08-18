@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "figforge"
+version = "0.5.0"
+description = "A scientific figure assembly app for lane-based images"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "Pillow>=11,<13",
+    "shiny>=1.4,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+]
+
+[tool.setuptools.packages.find]
+include = ["figforge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
