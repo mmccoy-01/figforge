@@ -27,7 +27,8 @@ def test_required_phase_one_files_exist() -> None:
         "figforge/persistence.py",
         "figforge/export.py",
         "figforge/static/css/app.css",
-        "figforge/static/img/figforge-icon.jpg",
+        "figforge/static/img/figforge-alt-logo.jpg",
+        "figforge/static/img/figforge-icon.png",
         "figforge/static/js/browser_recovery.js",
     )
 
@@ -103,7 +104,7 @@ def test_ui_builds_with_shiny() -> None:
     assert 'id="browser_recovery_status"' in rendered
     assert 'href="https://github.com/mmccoy-01/figforge"' in rendered
     assert "View FigForge source code on GitHub" in rendered
-    assert 'src="/static/img/figforge-icon.jpg"' in rendered
+    assert 'src="/static/img/figforge-icon.png"' in rendered
     assert 'rel="icon"' in rendered
 
 

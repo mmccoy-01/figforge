@@ -17,8 +17,8 @@ def build_app_ui():
             ui.tags.title("FigForge"),
             ui.tags.link(
                 rel="icon",
-                type="image/jpeg",
-                href="/static/img/figforge-icon.jpg",
+                type="image/png",
+                href="/static/img/figforge-icon.png",
             ),
             ui.include_css(css_path),
             ui.tags.script(src="/static/js/browser_recovery.js", defer=True),
@@ -28,7 +28,7 @@ def build_app_ui():
             ui.tags.header(
                 ui.tags.div(
                     ui.tags.img(
-                        src="/static/img/figforge-icon.jpg",
+                            src="/static/img/figforge-icon.png",
                         alt="",
                         class_="brand-mark",
                         aria_hidden="true",

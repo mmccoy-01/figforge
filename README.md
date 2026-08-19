@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="figforge/static/img/figforge-icon.jpg" alt="FigForge app icon" width="180">
+  <img src="figforge/static/img/figforge-icon.png" alt="FigForge app icon" width="180">
 </p>
 
 <h1 align="center">FigForge</h1>
@@ -155,6 +155,13 @@ nextsteps.md                   Product roadmap and implementation history
 - [Architecture and browser/server contract](docs/ARCHITECTURE.md)
 - [Changelog](CHANGELOG.md)
 - [Product roadmap](nextsteps.md)
+
+## Brand assets
+
+The simplified two-mark [`figforge-icon.png`](figforge/static/img/figforge-icon.png)
+is the primary application icon and favicon. The original full gel-and-label
+illustration remains available as
+[`figforge-alt-logo.jpg`](figforge/static/img/figforge-alt-logo.jpg).
 
 ## Scientific-data handling
 
