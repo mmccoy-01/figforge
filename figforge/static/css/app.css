@@ -71,17 +71,13 @@ body {
 }
 
 .brand-mark {
-  display: grid;
+  display: block;
   width: 34px;
   height: 34px;
-  place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.26);
   border-radius: 9px;
-  color: #c6fff4;
-  background: rgba(255, 255, 255, 0.08);
-  font-family: Georgia, serif;
-  font-size: 23px;
-  font-weight: 700;
+  background: #fff;
+  object-fit: cover;
 }
 
 .brand-name {
@@ -118,6 +114,31 @@ body {
   background: var(--accent);
 }
 
+.header-repo-link {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  margin-left: 3px;
+  padding: 7px;
+  place-items: center;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.58);
+  text-decoration: none;
+}
+
+.github-mark {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.header-repo-link:hover,
+.header-repo-link:focus-visible {
+  color: #c6fff4;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 button:disabled,
 input:disabled,
 select:disabled {
@@ -126,10 +147,16 @@ select:disabled {
 }
 
 .app-content {
-  display: grid;
-  grid-template-rows: 49px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+}
+
+.reset-crop-button {
+  width: 100%;
+}
+
+.crop-help {
+  margin-bottom: 0;
 }
 
 .app-content .nav-tabs {

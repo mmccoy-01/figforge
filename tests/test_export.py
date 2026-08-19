@@ -95,6 +95,35 @@ def test_600_dpi_render_scales_labels_and_canvas(tmp_path: Path) -> None:
     assert any(channel != 255 for channel in label_crop.tobytes())
 
 
+def test_export_uses_non_destructive_source_crop(tmp_path: Path) -> None:
+    source = Image.new("RGB", (40, 20), color=(210, 20, 25))
+    source.paste((20, 35, 210), (20, 0, 40, 20))
+    source_path = tmp_path / "split.png"
+    source.save(source_path, format="PNG")
+    store = AssetStore(tmp_path / "crop-assets")
+    asset = store.import_upload(source_path, original_filename="split.png")
+    _, _, base_state = export_fixture(tmp_path)
+    payload = base_state.to_dict()
+    image = payload["images"][0]
+    image.update(
+        {
+            "asset_id": asset.asset_id,
+            "filename": asset.filename,
+            "source_url": asset.source_url,
+            "display_url": asset.url,
+            "crop": {"x": 20, "y": 0, "width": 20, "height": 20},
+        }
+    )
+    cropped_state = CanvasState.from_mapping(payload)
+
+    rendered = render_figure(cropped_state, (asset,), store, dpi=300)
+
+    red, green, blue = rendered.getpixel((60, 80))
+    assert blue > 180
+    assert red < 50
+    assert green < 60
+
+
 def test_vertical_cell_border_extension_is_included_in_export(tmp_path: Path) -> None:
     store, asset, state = export_fixture(tmp_path)
     payload = state.to_dict()

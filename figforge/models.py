@@ -6,12 +6,47 @@ from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 
-SCHEMA_VERSION = 7
-LEGACY_SCHEMA_VERSIONS = {5, 6}
+SCHEMA_VERSION = 8
+LEGACY_SCHEMA_VERSIONS = {5, 6, 7}
 MAX_LANES = 30
 VALID_HORIZONTAL_ALIGNMENTS = {"left", "center", "right"}
 VALID_VERTICAL_ALIGNMENTS = {"top", "middle", "bottom"}
 VALID_ROTATIONS = {-90, 0, 90}
+
+
+@dataclass(frozen=True, slots=True)
+class CropState:
+    """A non-destructive source-pixel rectangle."""
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any] | None,
+        *,
+        original_width: int,
+        original_height: int,
+    ) -> CropState:
+        mapping = value if isinstance(value, Mapping) else {}
+        crop = cls(
+            x=float(mapping.get("x", 0)),
+            y=float(mapping.get("y", 0)),
+            width=float(mapping.get("width", original_width)),
+            height=float(mapping.get("height", original_height)),
+        )
+        tolerance = 1e-6
+        if crop.x < 0 or crop.y < 0 or crop.width <= 0 or crop.height <= 0:
+            raise ValueError("Crop rectangle must have positive in-bounds dimensions")
+        if (
+            crop.x + crop.width > original_width + tolerance
+            or crop.y + crop.height > original_height + tolerance
+        ):
+            raise ValueError("Crop rectangle exceeds the original image")
+        return crop
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,22 +64,30 @@ class ImageTransform:
     y: float
     width: float
     height: float
+    crop: CropState
     rotation: float = 0
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> ImageTransform:
+        original_width = int(value["original_width"])
+        original_height = int(value["original_height"])
         image = cls(
             image_id=str(value["image_id"]),
             asset_id=str(value["asset_id"]),
             filename=str(value["filename"]),
             source_url=str(value["source_url"]),
             display_url=str(value["display_url"]),
-            original_width=int(value["original_width"]),
-            original_height=int(value["original_height"]),
+            original_width=original_width,
+            original_height=original_height,
             x=float(value["x"]),
             y=float(value["y"]),
             width=float(value["width"]),
             height=float(value["height"]),
+            crop=CropState.from_mapping(
+                value.get("crop"),
+                original_width=original_width,
+                original_height=original_height,
+            ),
             rotation=float(value.get("rotation", 0)),
         )
         if image.original_width <= 0 or image.original_height <= 0:

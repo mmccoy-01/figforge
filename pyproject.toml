@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "figforge"
-version = "0.11.0"
+version = "0.13.0b1"
 description = "A scientific figure assembly app for lane-based images"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,6 +20,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["figforge*"]
+
+[tool.setuptools.package-data]
+figforge = ["static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

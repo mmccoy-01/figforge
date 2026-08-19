@@ -31,13 +31,9 @@ APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 ASSET_DIR = DATA_DIR / "assets"
 ASSET_STORE = AssetStore(ASSET_DIR)
-IS_CONNECT_CLOUD = (
-    os.getenv("R_CONFIG_ACTIVE") == "connect_cloud"
-    or os.getenv("QUARTO_PROFILE") == "connect_cloud"
-)
-STORAGE_MODE = os.getenv(
-    "FIGFORGE_STORAGE_MODE", "portable" if IS_CONNECT_CLOUD else "local"
-).lower()
+STORAGE_MODE = os.getenv("FIGFORGE_STORAGE_MODE", "portable").strip().lower()
+if STORAGE_MODE not in {"portable", "local"}:
+    raise RuntimeError("FIGFORGE_STORAGE_MODE must be 'portable' or 'local'")
 LOCAL_PERSISTENCE = STORAGE_MODE == "local"
 PROJECT_STORE = ProjectStore(DATA_DIR / "figforge.db") if LOCAL_PERSISTENCE else None
 
@@ -404,7 +400,6 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         await session.send_custom_message(
             "figforge:recovery-complete", {"label": "Browser draft recovered"}
         )
-        ui.update_navset("primary_navigation", selected="editor", session=session)
         ui.notification_show(
             "Recovered the latest draft saved by this browser",
             type="message",
@@ -504,50 +499,6 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         )
 
     @reactive.effect
-    @reactive.event(input.save_version_request, ignore_none=True)
-    def prompt_save_version() -> None:
-        if PROJECT_STORE is None:
-            ui.notification_show(
-                "Version history requires persistent local storage. Download a "
-                ".figforge project checkpoint on Connect Cloud.",
-                type="message",
-                duration=6,
-            )
-            return
-        state = canvas_state()
-        if not state.images and state.template_frame is None:
-            ui.notification_show(
-                "Add an image or start a blank template before saving a version.",
-                type="error",
-                duration=4,
-            )
-            return
-        ui.modal_show(
-            ui.modal(
-                ui.input_text(
-                    "version_note",
-                    "Version note (optional)",
-                    placeholder="e.g. Final labels before export",
-                ),
-                ui.tags.p(
-                    "This creates an immutable checkpoint without duplicating source images.",
-                    class_="version-modal-help",
-                ),
-                title="Save Version",
-                easy_close=True,
-                footer=ui.TagList(
-                    ui.modal_button("Cancel"),
-                    ui.tags.button(
-                        "Save Version",
-                        id="confirm_save_version",
-                        type="button",
-                        class_="btn btn-primary",
-                    ),
-                ),
-            )
-        )
-
-    @reactive.effect
     @reactive.event(input.export_figure_request, ignore_none=True)
     def prompt_export_figure() -> None:
         if not canvas_state().images:
@@ -598,97 +549,6 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         )
 
     @reactive.effect
-    @reactive.event(input.save_version_confirm, ignore_none=True)
-    def save_version() -> None:
-        if PROJECT_STORE is None:
-            return
-        request = input.save_version_confirm()
-        note = request.get("note", "") if isinstance(request, dict) else ""
-        persist_current_project()
-        revision = PROJECT_STORE.create_revision(project_id(), str(note))
-        history_project_id.set(project_id())
-        preview_revision_id.set(revision.revision_id)
-        projects_version.set(projects_version() + 1)
-        ui.modal_remove()
-        ui.notification_show(
-            f"Version {revision.version_number} saved",
-            type="message",
-            duration=4,
-        )
-
-    @reactive.effect
-    @reactive.event(input.history_project_request, ignore_none=True)
-    def show_project_history() -> None:
-        if PROJECT_STORE is None:
-            return
-        requested = input.history_project_request()
-        requested_id = requested.get("project_id") if isinstance(requested, dict) else requested
-        try:
-            revisions = PROJECT_STORE.list_revisions(str(requested_id))
-        except KeyError:
-            ui.notification_show("That local project is no longer available", type="error")
-            return
-        history_project_id.set(str(requested_id))
-        preview_revision_id.set(revisions[0].revision_id if revisions else None)
-
-    @reactive.effect
-    @reactive.event(input.preview_revision_request, ignore_none=True)
-    def preview_revision() -> None:
-        requested = input.preview_revision_request()
-        if not isinstance(requested, dict):
-            return
-        if requested.get("project_id") != history_project_id():
-            return
-        preview_revision_id.set(str(requested.get("revision_id", "")) or None)
-
-    @reactive.effect
-    @reactive.event(input.close_history_request, ignore_none=True)
-    def close_history() -> None:
-        history_project_id.set(None)
-        preview_revision_id.set(None)
-
-    @reactive.effect
-    @reactive.event(input.restore_revision_request, ignore_none=True)
-    async def restore_revision() -> None:
-        if PROJECT_STORE is None:
-            return
-        requested = input.restore_revision_request()
-        if not isinstance(requested, dict):
-            return
-        requested_project_id = str(requested.get("project_id", ""))
-        requested_revision_id = str(requested.get("revision_id", ""))
-        try:
-            project = PROJECT_STORE.restore_revision(
-                requested_project_id, requested_revision_id
-            )
-            restored_head = PROJECT_STORE.list_revisions(requested_project_id)[0]
-        except KeyError:
-            ui.notification_show("That saved version is no longer available", type="error")
-            return
-        project_id.set(project.project_id)
-        project_name.set(project.name)
-        canvas_state.set(project.state)
-        assets.set(project.assets)
-        dirty.set(False)
-        history_project_id.set(project.project_id)
-        preview_revision_id.set(restored_head.revision_id)
-        projects_version.set(projects_version() + 1)
-        await session.send_custom_message(
-            "figforge:load-project",
-            {
-                "name": project.name,
-                "state": project.state.to_dict(),
-                "assets": [asset.to_client_dict() for asset in project.assets],
-            },
-        )
-        ui.update_navset("primary_navigation", selected="editor", session=session)
-        ui.notification_show(
-            f"Restored as version {restored_head.version_number}",
-            type="message",
-            duration=5,
-        )
-
-    @reactive.effect
     @reactive.event(input.open_project_request, ignore_none=True)
     async def open_project() -> None:
         if PROJECT_STORE is None:
@@ -717,7 +577,6 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 "assets": [asset.to_client_dict() for asset in project.assets],
             },
         )
-        ui.update_navset("primary_navigation", selected="editor", session=session)
 
     @reactive.effect
     @reactive.event(input.new_project_request, ignore_none=True)
@@ -731,7 +590,6 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             "figforge:load-project",
             {"name": "Untitled figure", "state": CanvasState.empty().to_dict(), "assets": []},
         )
-        ui.update_navset("primary_navigation", selected="editor", session=session)
 
     @reactive.effect
     @reactive.event(input.project_upload, ignore_none=True)
@@ -762,7 +620,6 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 "assets": [asset.to_client_dict() for asset in imported_assets],
             },
         )
-        ui.update_navset("primary_navigation", selected="editor", session=session)
         ui.notification_show("Portable project opened", type="message", duration=4)
 
     @output

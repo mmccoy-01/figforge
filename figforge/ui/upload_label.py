@@ -190,11 +190,26 @@ def _properties_panel():
         ui.tags.div(
             _property_group(
                 "Position & Size",
-                _compact_fields(
-                    ("X", "prop_x"),
-                    ("Y", "prop_y"),
-                    ("W", "prop_width"),
-                    ("H", "prop_height"),
+                ui.tags.div(
+                    _compact_fields(
+                        ("X", "prop_x"),
+                        ("Y", "prop_y"),
+                        ("W", "prop_width"),
+                        ("H", "prop_height"),
+                    ),
+                    ui.tags.button(
+                        "Reset crop",
+                        id="reset_crop",
+                        type="button",
+                        class_="lane-action reset-crop-button",
+                        disabled=True,
+                        title="Restore the complete immutable source image",
+                    ),
+                    ui.tags.p(
+                        "Crop changes only the visible source region; the uploaded image stays unchanged.",
+                        class_="lane-guide-help crop-help",
+                    ),
+                    class_="property-stack",
                 ),
             ),
             _property_group("Lane Guides", _lane_guide_controls()),

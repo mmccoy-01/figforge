@@ -1,12 +1,20 @@
 """Smoke tests for the Phase 1 repository scaffold."""
 
+import tomllib
 from pathlib import Path
 
+from figforge import __version__
 from figforge.models import SCHEMA_VERSION
 from figforge.ui import build_app_ui
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_release_version_is_synchronized() -> None:
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert metadata["project"]["version"] == __version__
 
 
 def test_required_phase_one_files_exist() -> None:
@@ -16,23 +24,23 @@ def test_required_phase_one_files_exist() -> None:
         "requirements.txt",
         "README.md",
         "figforge/ui/upload_label.py",
-        "figforge/ui/quantification.py",
-        "figforge/ui/my_figures.py",
         "figforge/persistence.py",
         "figforge/export.py",
         "figforge/static/css/app.css",
+        "figforge/static/img/figforge-icon.jpg",
         "figforge/static/js/browser_recovery.js",
     )
 
     assert all((ROOT / path).is_file() for path in required)
 
 
-def test_three_navigation_labels_are_defined() -> None:
+def test_deferred_navigation_panes_are_removed() -> None:
     source = (ROOT / "figforge" / "ui" / "__init__.py").read_text(encoding="utf-8")
 
-    assert "Upload & Label" in source
-    assert "Quantification" in source
-    assert "My Figures" in source
+    assert "upload_label_panel()" in source
+    assert "Quantification" not in source
+    assert "My Figures" not in source
+    assert "navset_tab" not in source
 
 
 def test_phase_one_editor_regions_are_present() -> None:
@@ -49,9 +57,10 @@ def test_ui_builds_with_shiny() -> None:
 
     rendered = str(build_app_ui())
 
-    assert "Upload &amp; Label" in rendered
+    assert "Upload and label workspace" in rendered
     assert "figure_canvas" in rendered
-    assert "Quantification is coming later" in rendered
+    assert "Quantification" not in rendered
+    assert "My Figures" not in rendered
     assert 'id="lane_count"' in rendered
     assert 'max="30"' in rendered
     assert 'id="label_grid_overlay"' in rendered
@@ -75,14 +84,16 @@ def test_ui_builds_with_shiny() -> None:
     assert 'id="repeat_pattern"' in rendered
     assert 'id="label_action_status"' in rendered
     assert 'id="save_project"' in rendered
-    assert 'id="save_version"' in rendered
+    assert 'id="save_version"' not in rendered
     assert 'id="export_figure"' in rendered
     assert 'id="download_project"' in rendered
     assert 'id="project_upload"' in rendered
     assert 'id="start_blank_template"' in rendered
     assert 'id="new_project"' in rendered
-    assert 'id="project_browser"' in rendered
-    assert 'id="revision_browser"' in rendered
+    assert 'id="project_browser"' not in rendered
+    assert 'id="revision_browser"' not in rendered
+    assert 'id="crop_tool"' in rendered
+    assert 'id="reset_crop"' in rendered
     assert 'id="undo_action"' in rendered
     assert 'id="redo_action"' in rendered
     assert 'id="browser_recovery_banner"' in rendered
@@ -90,6 +101,10 @@ def test_ui_builds_with_shiny() -> None:
     assert 'id="discard_browser_draft"' in rendered
     assert 'id="recovery_upload"' in rendered
     assert 'id="browser_recovery_status"' in rendered
+    assert 'href="https://github.com/mmccoy-01/figforge"' in rendered
+    assert "View FigForge source code on GitHub" in rendered
+    assert 'src="/static/img/figforge-icon.jpg"' in rendered
+    assert 'rel="icon"' in rendered
 
 
 def test_browser_and_server_canvas_schema_versions_match() -> None:

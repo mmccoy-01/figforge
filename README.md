@@ -1,18 +1,45 @@
-# FigForge
+<p align="center">
+  <img src="figforge/static/img/figforge-icon.jpg" alt="FigForge app icon" width="180">
+</p>
 
-FigForge is a desktop-first scientific figure assembly app focused on fast,
-structured labeling of Western blots, gels, and other lane-based images. The
-current implementation includes the image canvas, lane guides, structured label
-rows, spreadsheet productivity tools, and project persistence.
+<h1 align="center">FigForge</h1>
 
-## Requirements
+<p align="center">
+  A browser-based scientific figure workspace for fast, structured labeling of
+  Western blots, gels, and other lane-based images.
+</p>
 
-- Python 3.11 or newer
-- Windows, macOS, or Linux
+> **Beta:** This repository contains FigForge `0.13.0-beta.1`. Keep the original
+> scientific images and download `.figforge` checkpoints regularly. Please report
+> problems through [GitHub Issues](https://github.com/mmccoy-01/figforge/issues).
 
-## Setup
+## What FigForge does
 
-From the repository root, create a virtual environment and install FigForge:
+FigForge combines a non-destructive image canvas with a spreadsheet-like label
+grid. It is designed for figures containing up to 30 lanes.
+
+- Import PNG, JPEG, and TIFF source images. TIFF files retain their original data
+  while using a browser-safe preview for editing.
+- Move, resize, fit, crop, reset, and delete images without changing the source
+  file. Undo and redo cover image deletion.
+- Align 1–30 uniform lane guides by dragging the outer boundaries.
+- Add label rows above or below an image and paste tabular data from Excel or
+  Google Sheets.
+- Navigate cells with the keyboard; format, merge, and unmerge rectangular ranges
+  horizontally or vertically.
+- Apply alignment, font styling, rotation, borders, row height, and vertical
+  border extensions toward the image.
+- Start without an image to create a reusable lane-label template.
+- Download and reopen portable `.figforge` projects containing the layout and
+  copies of the immutable source assets.
+- Export publication output as PNG, TIFF, or PDF at 300 or 600 DPI.
+
+Lane guides, selection outlines, resize handles, and the editing background are
+never included in publication exports.
+
+## Quick start
+
+FigForge requires Python 3.11 or newer.
 
 ### Windows PowerShell
 
@@ -20,7 +47,8 @@ From the repository root, create a virtual environment and install FigForge:
 py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements.txt
+shiny run --reload app.py
 ```
 
 ### macOS or Linux
@@ -29,188 +57,115 @@ python -m pip install -e ".[dev]"
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
-
-## Run
-
-```bash
+python -m pip install -r requirements.txt
 shiny run --reload app.py
 ```
 
-Shiny prints the local URL to the terminal, usually
-<http://127.0.0.1:8000>. Open that URL in a browser.
+Open the local URL printed by Shiny, normally <http://127.0.0.1:8000>.
 
-To expose the app to other devices on the local network, use:
-
-```bash
-shiny run --host 0.0.0.0 --port 8000 app.py
-```
-
-## Verify
+Developers can install the editable package and test dependencies instead:
 
 ```bash
+python -m pip install -e ".[dev]"
 pytest
 ```
 
-## Project structure
+## Basic workflow
+
+1. Upload a PNG, JPEG, or TIFF image, or choose **Start without image**.
+2. Set the lane count and align the temporary lane guides.
+3. Add label rows above or below the image.
+4. Enter values directly or paste cells copied from a spreadsheet.
+5. Select ranges to merge cells or apply text and border formatting.
+6. Choose **Download project** to create a durable `.figforge` checkpoint.
+7. Use **Export** to render a clean PNG, TIFF, or PDF figure.
+
+Use **Open project** to resume a downloaded project or template. A template made
+without an image preserves its labels and formatting when the first image is
+attached later.
+
+## Saving and browser recovery
+
+A `.figforge` download is the durable, portable project format. It keeps
+schema-versioned figure state separate from copies of the original source images;
+imported assets are validated again when the project is reopened.
+
+On Posit Connect Cloud, FigForge also caches the current draft and source images
+in IndexedDB in the same browser profile. After a refresh or expired server
+session, the **Restore draft** banner can rebuild the project in a new Shiny
+session. The recovery indicator reports success only after the state and all
+referenced source images are present in the browser.
+
+Browser recovery is a convenience layer, not permanent cloud storage. It does
+not follow the user to another browser or device and can disappear if site data
+is cleared, private browsing is used, or storage is evicted. Download `.figforge`
+checkpoints at meaningful milestones.
+
+The header **Save** action marks the active session draft as saved. It is not a
+substitute for **Download project** on Connect Cloud.
+
+## Deploy to Posit Connect Cloud
+
+This repository is ready for GitHub-based deployment:
+
+1. Push the repository to GitHub.
+2. In Connect Cloud, choose **Publish** and select the repository and branch.
+3. Select Shiny for Python and use `app.py` as the primary file.
+4. Enable automatic republishing on push if desired.
+5. Deploy, then test upload, browser recovery, `.figforge` download/reopen, and
+   each export format at the public URL.
+
+`requirements.txt` contains the runtime dependencies Connect Cloud needs.
+FigForge defaults to portable-project mode, so runtime worker files are never
+presented as permanent user storage. No database configuration is required.
+
+See [Deployment and persistence](docs/DEPLOYMENT.md) for the release checklist,
+configuration details, and an important distinction between Posit Connect Cloud
+deployment and Posit Cloud code-project export. The current official publishing
+workflow is documented by [Posit Connect Cloud](https://docs.posit.co/connect-cloud/user/publish/01-new.html).
+
+## Beta limitations
+
+- The editor is desktop-first and currently requires a viewport at least 940 px
+  wide; mobile editing is not supported.
+- Lane widths are uniform. The left and right lane-region boundaries are
+  adjustable, but individual internal boundaries are not yet editable.
+- TIFF editing uses the first frame as the display preview.
+- There is no account system, shared project library, cloud database, or
+  server-side revision history.
+- Browser recovery is same-browser and same-deployment-origin only.
+- Quantification is intentionally outside this beta's scope.
+
+## Project layout
 
 ```text
-app.py                       Shiny application entry point
-figforge/ui/                 Top-level screens and editor shell
-figforge/static/css/app.css  Application styling
-figforge/static/js/          Interactive canvas and Shiny browser bindings
-data/                        Local project data (contents ignored by Git)
-tests/                       Model, persistence, export, asset, and UI tests
+app.py                         Shiny application and server entry point
+figforge/                      Models, persistence, export, and UI modules
+figforge/static/               Browser JavaScript, CSS, and app artwork
+data/                          Local runtime data (ignored by Git)
+docs/                          Deployment, architecture, and beta test guides
+tests/                         Automated model, persistence, export, asset, and UI tests
+nextsteps.md                   Product roadmap and implementation history
 ```
 
-## Current scope
+## Documentation
 
-The three top-level tabs and full Upload & Label workspace are in place. PNG,
-JPEG, and TIFF uploads are validated and copied byte-for-byte into `data/assets`.
-Uploaded images can be selected, moved, resized with their aspect ratio locked,
-fit to the canvas, and deleted. The source asset is never altered; the browser
-sends only a schema-versioned transform state back to Shiny.
+- [Beta testing guide](docs/BETA_TESTING.md)
+- [Deployment and persistence](docs/DEPLOYMENT.md)
+- [Architecture and browser/server contract](docs/ARCHITECTURE.md)
+- [Changelog](CHANGELOG.md)
+- [Product roadmap](nextsteps.md)
 
-Selected images support temporary uniform lane guides for 1–30 lanes. The left
-and right guide edges are draggable, internal boundaries redistribute evenly,
-opacity is adjustable, and all positions are stored as normalized coordinates.
-The guides are a browser overlay and never alter the scientific image.
+## Scientific-data handling
 
-Structured label rows can be placed above or below a selected image. Each row
-tracks the image's lane count (up to 30 cells), remains aligned to the normalized
-lane region, and supports spreadsheet-style editing: click to select,
-double-click or Enter to edit, Tab/Shift+Tab and arrow keys to move, Escape to
-cancel, and Delete/Backspace to clear a cell. Rows can be renamed, repositioned,
-or deleted from the properties panel.
+FigForge does not overwrite uploaded source images. Image placement and cropping
+are stored as transforms, and export is rendered from the immutable source asset.
+Even so, this is beta software: verify every exported figure against the source
+data before publication and retain independent copies of all originals.
 
-Cells support drag and Shift-click range selection, reversible rectangular
-merge/unmerge across columns and rows, configurable border edges, horizontal
-alignment, font size, bold/italic/underline, 0°/90°/-90° text rotation, and
-adjustable row height. Selected left and right borders can also be extended
-toward the source image by a user-entered pixel length. Covered cells retain
-their contents while merged so unmerging is lossless.
+## Feedback
 
-Keyboard commands are scoped to the active editing surface: Backspace/Delete
-edits or clears label cells without deleting the image, and arrow keys move the
-active cell. Deleting the selected canvas image can be reversed with the Undo
-button or Ctrl/Cmd+Z and reapplied with Redo, Ctrl/Cmd+Shift+Z, or Ctrl/Cmd+Y.
-
-Spreadsheet data copied from Excel or Google Sheets can be pasted directly
-into a selected starting cell. Tabs populate lanes, newlines populate existing
-or automatically created rows, and over-wide or merged-cell destinations are
-rejected with a visible warning. Productivity helpers fill lane numbers or
-repeat a selected pattern across all lanes.
-
-Local runs autosave one mutable project draft to `data/figforge.db`. **Save**
-writes immediately, and **My Figures** lists saved projects with a source-image
-thumbnail and last-edited time. Opening a project restores its canvas, images,
-lane guides, label rows, and cell formatting.
-
-**Save Version** creates an immutable checkpoint with an optional note. My
-Figures shows each project's version count and a newest-first history. Selecting
-a version opens a read-only preview of its source image and lane-aligned labels.
-Restoring historical state always creates a new head version (for example,
-restoring v1 after v2 creates v3); it never deletes the intervening versions or
-duplicates the immutable source image.
-
-FigForge can also download a portable `.figforge` project bundle. A bundle keeps
-the schema-versioned JSON state separate from copies of the original immutable
-source images. Use **Open project** to import that file and continue editing.
-Imported assets are validated again and receive new internal IDs, leaving the
-bundle and existing source assets unchanged.
-
-Projects can begin as image-independent templates. Choose **Start without
-image**, set the lane count, and create or format label rows normally. Download
-the result as a `.figforge` file; because it contains a template frame rather
-than a scientific image, it has no bundled image assets. Opening that file later
-restores the complete layout. The first subsequently uploaded image replaces
-the template frame while preserving its lane grid, rows, merges, text, borders,
-and formatting. Publication export remains unavailable until a real image is
-attached. Changing the lane count while the template frame is active adapts the
-layout: lane-number rows are regenerated, repeating row patterns continue to
-the requested count, and merged groups are proportionally remapped with their
-formatting intact. Templates support any requested count from 1–30 lanes.
-
-The header **Export** action produces PNG, TIFF, or PDF output at 300 or 600
-DPI. FigForge renders from the immutable source image at the requested output
-resolution and redraws structured label text, formatting, horizontal/vertical
-merges, borders, and border extensions.
-Temporary lane guides, selection outlines, resize handles, and the checkerboard
-editing background are never included. PNG and TIFF files carry DPI metadata;
-PDF uses the selected resolution for its raster publication page.
-
-Browsers do not consistently decode TIFF files, so FigForge creates a separate
-PNG display preview of the first TIFF frame. This derivative is used only for
-interactive display; the original TIFF remains unchanged and is retained as
-the scientific source asset. High-bit-depth grayscale TIFF previews are scaled
-to an 8-bit display range without modifying the source data.
-
-Reusable templates are complete for the local and portable-project MVP. The
-next major milestone in [`nextsteps.md`](nextsteps.md) is authenticated cloud
-storage and per-user project ownership.
-
-## Posit Connect Cloud persistence
-
-Connect Cloud runtime files are temporary, so FigForge automatically uses
-portable-project mode when `R_CONFIG_ACTIVE=connect_cloud` or
-`QUARTO_PROFILE=connect_cloud` is present. In this mode:
-
-1. work normally during the active browser session; FigForge caches the latest
-   draft and its original source images in IndexedDB on that browser;
-2. after a refresh or expired server session, choose **Restore draft** in the
-   recovery banner to rebuild the project in the new Shiny session;
-3. choose **Download project** before leaving or at important milestones;
-4. keep the resulting `.figforge` file on the user's computer or institutional
-   storage;
-5. on another browser or device, choose **Open project** and select that file.
-
-The browser recovery status beneath the project controls changes to **Browser
-recovery saved** only after the current canvas JSON and every referenced source
-image are available locally. Recovery works for image-backed projects and blank
-templates. Source images are revalidated by the server and assigned new internal
-IDs when restored.
-
-Browser recovery is a convenience safety layer, not durable project storage. It
-is limited to the same browser profile and deployment origin, and can be lost if
-the user clears site data, uses private browsing, or the browser evicts storage.
-FigForge requests persistent browser storage when supported, but the browser may
-decline. A downloaded `.figforge` file remains the portable source of truth.
-
-The header **Save** action in this mode only marks the current session draft as
-saved; it does not claim that Connect Cloud has stored the draft permanently.
-Likewise, local SQLite version history is unavailable in portable mode; download
-a new `.figforge` checkpoint whenever a durable cloud-session milestone is
-needed.
-The **My Figures** screen explains the portable workflow and never displays a
-process-wide SQLite list that could mix projects from different visitors.
-
-Set `FIGFORGE_STORAGE_MODE=local` only for a trusted single-user deployment with
-a genuinely persistent mounted data directory. Seamless cross-device project
-libraries on Connect Cloud require the later account architecture: user
-authentication, a persistent database, and private object storage.
-
-## Browser/server message contract
-
-- `figforge:add-asset` (Shiny → browser): validated asset ID, immutable source
-  URL, browser-display URL, filename, and original dimensions.
-- `canvas_state` (browser → Shiny): schema version, canvas dimensions, and each
-  image's source reference plus non-destructive display transform, temporary
-  lane-grid state, and lane-aligned label-row contents, spans, and formatting.
-- `project_name_change` (browser → Shiny): the current figure name for autosave
-  and portable download filenames.
-- `figforge:load-project` (Shiny → browser): a validated canvas state and its
-  remapped asset records.
-- `figforge:save-status` (Shiny → browser): local or session-draft save status.
-- `browser_recovery_request` (browser → Shiny): validated draft metadata and
-  schema-versioned canvas state recovered from IndexedDB.
-- `figforge:recovery-ready` (Shiny → browser): requests the required immutable
-  source blobs through the hidden `recovery_upload` Shiny file input.
-- `figforge:recovery-complete` / `figforge:recovery-error` (Shiny → browser):
-  completes the restore banner workflow after asset remapping and validation.
-- `save_version_confirm` (browser → Shiny): an atomic Save Version confirmation
-  carrying the optional note.
-- `history_project_request`, `preview_revision_request`, and
-  `restore_revision_request` (browser → Shiny): local revision browser actions.
-- `export_figure_request` (browser → Shiny): opens validated PNG, TIFF, and PDF
-  export controls; the download itself is streamed by Shiny.
+For a beta problem report, include the FigForge version, browser and operating
+system, the action being performed, the expected result, and steps that reproduce
+the issue. Do not attach unpublished or sensitive scientific images to a public
+issue; use a synthetic or redacted example instead.

@@ -41,6 +41,7 @@ def valid_state() -> dict:
                 "y": 80,
                 "width": 600,
                 "height": 150,
+                "crop": {"x": 0, "y": 0, "width": 1200, "height": 300},
                 "rotation": 0,
             }
         ],
@@ -99,6 +100,28 @@ def test_schema_five_projects_migrate_border_extensions_to_zero() -> None:
     assert state.label_rows[0].cells[0].border_extension == 0
     assert state.label_rows[0].cells[0].rowspan == 1
     assert state.to_dict()["label_rows"][0]["cells"][0]["border_extension"] == 0
+
+
+def test_schema_seven_projects_migrate_to_full_source_crop() -> None:
+    payload = valid_state()
+    payload["schema_version"] = 7
+    payload["images"][0].pop("crop")
+
+    state = CanvasState.from_mapping(payload)
+
+    assert state.schema_version == SCHEMA_VERSION
+    assert state.images[0].crop.x == 0
+    assert state.images[0].crop.y == 0
+    assert state.images[0].crop.width == 1200
+    assert state.images[0].crop.height == 300
+
+
+def test_crop_must_remain_inside_original_image() -> None:
+    payload = valid_state()
+    payload["images"][0]["crop"] = {"x": 1100, "y": 0, "width": 200, "height": 300}
+
+    with pytest.raises(ValueError, match="exceeds the original image"):
+        CanvasState.from_mapping(payload)
 
 
 def test_canvas_state_rejects_distorted_zero_sized_image() -> None:

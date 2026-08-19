@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  const SCHEMA_VERSION = 7;
+  const SCHEMA_VERSION = 8;
   const MAX_LANES = 30;
   const DEFAULT_LANE_OPACITY = 0.35;
   const DEFAULT_GRID_LEFT = 0.05;
@@ -18,6 +18,7 @@
   const MIN_GRID_SPAN = 0.04;
   const HANDLE_SIZE = 11;
   const MIN_IMAGE_SIZE = 36;
+  const MIN_CROP_SIZE = 20;
   const SELECTION_COLOR = "#087f72";
 
   class FigureCanvas {
@@ -41,6 +42,8 @@
       this.undoStack = [];
       this.redoStack = [];
       this.interaction = null;
+      this.cropMode = false;
+      this.cropSessionStart = null;
       this.stageWidth = 0;
       this.stageHeight = 0;
       this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -62,6 +65,11 @@
           || target instanceof HTMLTextAreaElement
           || target?.isContentEditable;
         const commandKey = event.ctrlKey || event.metaKey;
+        if (event.key === "Escape" && this.cropMode && !editingText) {
+          event.preventDefault();
+          this.finishCrop(false);
+          return;
+        }
         if (commandKey && event.key.toLowerCase() === "z" && !editingText) {
           event.preventDefault();
           if (event.shiftKey) this.redo();
@@ -82,65 +90,6 @@
       });
 
       document.addEventListener("click", (event) => {
-        if (event.target.closest("#confirm_save_version")) {
-          window.Shiny?.setInputValue(
-            "save_version_confirm",
-            {
-              note: document.getElementById("version_note")?.value || "",
-              timestamp: Date.now(),
-            },
-            { priority: "event" },
-          );
-          return;
-        }
-        const openProject = event.target.closest("[data-open-project]");
-        if (openProject) {
-          window.Shiny?.setInputValue(
-            "open_project_request",
-            { project_id: openProject.dataset.openProject, timestamp: Date.now() },
-            { priority: "event" },
-          );
-          return;
-        }
-        const projectHistory = event.target.closest("[data-project-history]");
-        if (projectHistory) {
-          window.Shiny?.setInputValue(
-            "history_project_request",
-            { project_id: projectHistory.dataset.projectHistory, timestamp: Date.now() },
-            { priority: "event" },
-          );
-          return;
-        }
-        const previewRevision = event.target.closest("[data-preview-revision]");
-        if (previewRevision) {
-          window.Shiny?.setInputValue(
-            "preview_revision_request",
-            {
-              project_id: previewRevision.dataset.projectId,
-              revision_id: previewRevision.dataset.previewRevision,
-              timestamp: Date.now(),
-            },
-            { priority: "event" },
-          );
-          return;
-        }
-        const restoreRevision = event.target.closest("[data-restore-revision]");
-        if (restoreRevision) {
-          window.Shiny?.setInputValue(
-            "restore_revision_request",
-            {
-              project_id: restoreRevision.dataset.projectId,
-              revision_id: restoreRevision.dataset.restoreRevision,
-              timestamp: Date.now(),
-            },
-            { priority: "event" },
-          );
-          return;
-        }
-        if (event.target.closest("[data-close-history]")) {
-          window.Shiny?.setInputValue("close_history_request", Date.now(), { priority: "event" });
-          return;
-        }
         if (event.target.closest("#new_project")) {
           window.FigForgeRecovery?.clear();
           window.Shiny?.setInputValue("new_project_request", Date.now(), { priority: "event" });
@@ -159,6 +108,8 @@
       });
 
       document.getElementById("fit_image")?.addEventListener("click", () => this.fitSelected());
+      document.getElementById("crop_tool")?.addEventListener("click", () => this.toggleCropMode());
+      document.getElementById("reset_crop")?.addEventListener("click", () => this.resetCrop());
       document.getElementById("start_blank_template")?.addEventListener(
         "click",
         () => this.startBlankTemplate(),
@@ -200,9 +151,6 @@
       document.getElementById("save_project")?.addEventListener("click", () => {
         this.setSaveStatus({ label: "Saving…", state: "saving" });
         window.Shiny?.setInputValue("save_project_request", Date.now(), { priority: "event" });
-      });
-      document.getElementById("save_version")?.addEventListener("click", () => {
-        window.Shiny?.setInputValue("save_version_request", Date.now(), { priority: "event" });
       });
       document.getElementById("export_figure")?.addEventListener("click", () => {
         window.Shiny?.setInputValue("export_figure_request", Date.now(), { priority: "event" });
@@ -282,6 +230,12 @@
           y,
           width: size.width,
           height: size.height,
+          crop: {
+            x: 0,
+            y: 0,
+            width: asset.width,
+            height: asset.height,
+          },
           rotation: 0,
         };
         if (template) {
@@ -330,7 +284,17 @@
       this.isLoadingProject = true;
       window.FigForgeRecovery?.recordProject(payload);
       this.finishEditing(false);
-      this.images = (payload.state?.images || []).map((image) => ({ ...image }));
+      this.images = (payload.state?.images || []).map((image) => ({
+        ...image,
+        crop: image.crop
+          ? { ...image.crop }
+          : {
+            x: 0,
+            y: 0,
+            width: image.original_width,
+            height: image.original_height,
+          },
+      }));
       this.templateFrame = payload.state?.template_frame
         ? { ...payload.state.template_frame, is_template: true }
         : null;
@@ -356,6 +320,8 @@
       this.selectionAnchor = null;
       this.editingCell = null;
       this.interaction = null;
+      this.cropMode = false;
+      this.cropSessionStart = null;
       this.undoStack = [];
       this.redoStack = [];
       this.updateHistoryControls();
@@ -408,7 +374,8 @@
         this.syncState();
         return;
       }
-      const size = this.fittedSize(image.original_width, image.original_height, 0.86, 0.82);
+      const crop = this.imageCrop(image);
+      const size = this.fittedSize(crop.width, crop.height, 0.86, 0.82);
       image.width = size.width;
       image.height = size.height;
       image.x = Math.round((this.stageWidth - size.width) / 2);
@@ -418,7 +385,110 @@
       this.syncState();
     }
 
+    imageCrop(image) {
+      return image.crop || {
+        x: 0,
+        y: 0,
+        width: image.original_width,
+        height: image.original_height,
+      };
+    }
+
+    isCropped(image) {
+      if (!image || image.is_template) return false;
+      const crop = this.imageCrop(image);
+      return crop.x > 0.001
+        || crop.y > 0.001
+        || crop.width < image.original_width - 0.001
+        || crop.height < image.original_height - 0.001;
+    }
+
+    toggleCropMode() {
+      if (this.cropMode) {
+        this.finishCrop(true);
+        return;
+      }
+      const image = this.selectedImage();
+      if (!image || image.is_template) return;
+      this.cropMode = true;
+      this.cropSessionStart = {
+        image_id: image.image_id,
+        x: image.x,
+        y: image.y,
+        width: image.width,
+        height: image.height,
+        crop: { ...this.imageCrop(image) },
+      };
+      this.updateCropControls();
+      this.draw();
+      this.canvas.focus({ preventScroll: true });
+    }
+
+    finishCrop(commit) {
+      if (!this.cropMode) return;
+      const snapshot = this.cropSessionStart;
+      const image = snapshot
+        ? this.images.find((candidate) => candidate.image_id === snapshot.image_id)
+        : null;
+      if (!commit && image && snapshot) {
+        Object.assign(image, {
+          x: snapshot.x,
+          y: snapshot.y,
+          width: snapshot.width,
+          height: snapshot.height,
+          crop: { ...snapshot.crop },
+        });
+      }
+      this.cropMode = false;
+      this.cropSessionStart = null;
+      this.interaction = null;
+      this.updateCropControls();
+      this.draw();
+      this.updateProperties();
+      this.syncState();
+    }
+
+    resetCrop() {
+      const image = this.selectedImage();
+      if (!image || image.is_template || !this.isCropped(image)) return;
+      const crop = this.imageCrop(image);
+      const scaleX = image.width / crop.width;
+      const scaleY = image.height / crop.height;
+      image.x -= crop.x * scaleX;
+      image.y -= crop.y * scaleY;
+      image.width = image.original_width * scaleX;
+      image.height = image.original_height * scaleY;
+      image.crop = {
+        x: 0,
+        y: 0,
+        width: image.original_width,
+        height: image.original_height,
+      };
+      this.draw();
+      this.updateProperties();
+      if (!this.cropMode) this.syncState();
+    }
+
+    updateCropControls() {
+      const image = this.selectedImage();
+      const cropButton = document.getElementById("crop_tool");
+      cropButton?.toggleAttribute("disabled", !image || image.is_template);
+      cropButton?.classList.toggle("tool-button--active", this.cropMode);
+      if (cropButton) {
+        const label = cropButton.querySelector("span:last-child");
+        if (label) label.textContent = this.cropMode ? "Done" : "Crop";
+        cropButton.title = this.cropMode
+          ? "Apply crop (Escape cancels)"
+          : "Crop the selected image non-destructively";
+      }
+      document.getElementById("reset_crop")?.toggleAttribute(
+        "disabled",
+        !this.isCropped(image),
+      );
+    }
+
     deleteSelected() {
+      if (this.cropMode) this.finishCrop(true);
       if (!this.selectedId) return;
       const deleteId = this.selectedId;
       const imageIndex = this.images.findIndex((image) => image.image_id === deleteId);
@@ -539,6 +609,7 @@
     }
 
     select(imageId) {
+      if (this.cropMode && imageId !== this.selectedId) this.finishCrop(true);
       this.finishEditing(true);
       this.selectedCell = null;
       this.selectionAnchor = null;
@@ -663,6 +734,22 @@
       const gridBoundary = selected && grid ? this.laneBoundaryAt(point, selected, grid) : null;
       const handle = selected ? this.handleAt(point, selected) : null;
 
+      if (this.cropMode && selected && !selected.is_template) {
+        const cropHandle = this.cropHandleAt(point, selected);
+        if (cropHandle) {
+          this.interaction = {
+            type: "crop",
+            handle: cropHandle,
+            startPoint: point,
+            start: { ...selected, crop: { ...this.imageCrop(selected) } },
+            fullBounds: this.fullImageBounds(selected),
+          };
+          this.canvas.setPointerCapture(event.pointerId);
+          event.preventDefault();
+        }
+        return;
+      }
+
       if (selected && grid && gridBoundary) {
         this.interaction = {
           type: "lane-boundary",
@@ -706,7 +793,16 @@
       const deltaX = point.x - this.interaction.startPoint.x;
       const deltaY = point.y - this.interaction.startPoint.y;
 
-      if (this.interaction.type === "lane-boundary") {
+      if (this.interaction.type === "crop") {
+        this.cropFromHandle(
+          image,
+          this.interaction.start,
+          this.interaction.fullBounds,
+          this.interaction.handle,
+          deltaX,
+          deltaY,
+        );
+      } else if (this.interaction.type === "lane-boundary") {
         const grid = this.selectedGrid();
         if (!grid) return;
         const normalized = Math.max(0, Math.min(1, (point.x - image.x) / image.width));
@@ -727,10 +823,66 @@
 
     pointerUp(event) {
       if (!this.interaction) return;
+      const interactionType = this.interaction.type;
       this.interaction = null;
       if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
-      this.syncState();
+      if (interactionType !== "crop") this.syncState();
       this.updateCursor(this.pointerPosition(event));
+    }
+
+    fullImageBounds(image) {
+      const crop = this.imageCrop(image);
+      const scaleX = image.width / crop.width;
+      const scaleY = image.height / crop.height;
+      return {
+        x: image.x - crop.x * scaleX,
+        y: image.y - crop.y * scaleY,
+        width: image.original_width * scaleX,
+        height: image.original_height * scaleY,
+      };
+    }
+
+    cropFromHandle(image, start, fullBounds, handle, deltaX, deltaY) {
+      const startRight = start.x + start.width;
+      const startBottom = start.y + start.height;
+      let left = start.x;
+      let top = start.y;
+      let right = startRight;
+      let bottom = startBottom;
+      if (handle.includes("left")) {
+        left = Math.max(fullBounds.x, Math.min(startRight - MIN_CROP_SIZE, start.x + deltaX));
+      }
+      if (handle.includes("right")) {
+        right = Math.min(
+          fullBounds.x + fullBounds.width,
+          Math.max(start.x + MIN_CROP_SIZE, startRight + deltaX),
+        );
+      }
+      if (handle.includes("top")) {
+        top = Math.max(fullBounds.y, Math.min(startBottom - MIN_CROP_SIZE, start.y + deltaY));
+      }
+      if (handle.includes("bottom")) {
+        bottom = Math.min(
+          fullBounds.y + fullBounds.height,
+          Math.max(start.y + MIN_CROP_SIZE, startBottom + deltaY),
+        );
+      }
+      image.x = left;
+      image.y = top;
+      image.width = right - left;
+      image.height = bottom - top;
+      image.crop = {
+        x: Math.max(0, (left - fullBounds.x) / fullBounds.width * image.original_width),
+        y: Math.max(0, (top - fullBounds.y) / fullBounds.height * image.original_height),
+        width: Math.min(
+          image.original_width,
+          (right - left) / fullBounds.width * image.original_width,
+        ),
+        height: Math.min(
+          image.original_height,
+          (bottom - top) / fullBounds.height * image.original_height,
+        ),
+      };
     }
 
     resizeFromHandle(image, start, handle, deltaX, deltaY) {
@@ -790,8 +942,48 @@
       return null;
     }
 
+    cropHandles(image) {
+      const centerX = image.x + image.width / 2;
+      const centerY = image.y + image.height / 2;
+      return {
+        "top-left": { x: image.x, y: image.y },
+        top: { x: centerX, y: image.y },
+        "top-right": { x: image.x + image.width, y: image.y },
+        left: { x: image.x, y: centerY },
+        right: { x: image.x + image.width, y: centerY },
+        "bottom-left": { x: image.x, y: image.y + image.height },
+        bottom: { x: centerX, y: image.y + image.height },
+        "bottom-right": { x: image.x + image.width, y: image.y + image.height },
+      };
+    }
+
+    cropHandleAt(point, image) {
+      for (const [name, handle] of Object.entries(this.cropHandles(image))) {
+        if (
+          Math.abs(point.x - handle.x) <= HANDLE_SIZE
+          && Math.abs(point.y - handle.y) <= HANDLE_SIZE
+        ) return name;
+      }
+      return null;
+    }
+
     updateCursor(point) {
       const selected = this.selectedImage();
+      if (this.cropMode && selected && !selected.is_template) {
+        const cropHandle = this.cropHandleAt(point, selected);
+        if (!cropHandle) {
+          this.canvas.style.cursor = "crosshair";
+        } else if (cropHandle === "left" || cropHandle === "right") {
+          this.canvas.style.cursor = "ew-resize";
+        } else if (cropHandle === "top" || cropHandle === "bottom") {
+          this.canvas.style.cursor = "ns-resize";
+        } else {
+          this.canvas.style.cursor = cropHandle === "top-left" || cropHandle === "bottom-right"
+            ? "nwse-resize"
+            : "nesw-resize";
+        }
+        return;
+      }
       const grid = this.selectedGrid();
       const boundary = selected && grid ? this.laneBoundaryAt(point, selected, grid) : null;
       const handle = selected ? this.handleAt(point, selected) : null;
@@ -821,14 +1013,45 @@
       }
       for (const image of this.images) {
         const element = this.imageElements.get(image.image_id);
-        if (element) this.context.drawImage(element, image.x, image.y, image.width, image.height);
+        if (element && this.cropMode && image.image_id === this.selectedId) {
+          this.drawFullCropPreview(element, image);
+        }
+        if (element) this.drawCroppedImage(element, image);
         const grid = this.laneGrids.get(image.image_id);
         if (grid?.visible) this.drawLaneGrid(image, grid, image.image_id === this.selectedId);
       }
       const selected = this.selectedImage();
-      if (selected) this.drawSelection(selected);
+      if (selected) {
+        if (this.cropMode && !selected.is_template) this.drawCropSelection(selected);
+        else this.drawSelection(selected);
+      }
       this.emptyState?.classList.toggle("is-hidden", this.surfaces().length > 0);
       this.positionLabelRows();
+    }
+
+    drawCroppedImage(element, image) {
+      const crop = this.imageCrop(image);
+      const scaleX = element.naturalWidth / image.original_width;
+      const scaleY = element.naturalHeight / image.original_height;
+      this.context.drawImage(
+        element,
+        crop.x * scaleX,
+        crop.y * scaleY,
+        crop.width * scaleX,
+        crop.height * scaleY,
+        image.x,
+        image.y,
+        image.width,
+        image.height,
+      );
+    }
+
+    drawFullCropPreview(element, image) {
+      const bounds = this.fullImageBounds(image);
+      this.context.save();
+      this.context.globalAlpha = 0.24;
+      this.context.drawImage(element, bounds.x, bounds.y, bounds.width, bounds.height);
+      this.context.restore();
     }
 
     drawTemplateFrame(frame) {
@@ -922,6 +1145,30 @@
       this.context.restore();
     }
 
+    drawCropSelection(image) {
+      this.context.save();
+      this.context.strokeStyle = SELECTION_COLOR;
+      this.context.lineWidth = 2;
+      this.context.strokeRect(image.x, image.y, image.width, image.height);
+      for (const handle of Object.values(this.cropHandles(image))) {
+        this.context.fillStyle = "#ffffff";
+        this.context.strokeStyle = SELECTION_COLOR;
+        this.context.fillRect(
+          handle.x - HANDLE_SIZE / 2,
+          handle.y - HANDLE_SIZE / 2,
+          HANDLE_SIZE,
+          HANDLE_SIZE,
+        );
+        this.context.strokeRect(
+          handle.x - HANDLE_SIZE / 2,
+          handle.y - HANDLE_SIZE / 2,
+          HANDLE_SIZE,
+          HANDLE_SIZE,
+        );
+      }
+      this.context.restore();
+    }
+
     updateProperties() {
       const image = this.selectedImage();
       const values = image
@@ -940,6 +1187,7 @@
       document.getElementById("fit_image")?.toggleAttribute("disabled", !image);
       document.getElementById("delete_image")?.toggleAttribute("disabled", !image || image.is_template);
       document.getElementById("add_row")?.toggleAttribute("disabled", !image);
+      this.updateCropControls();
       this.updateLaneControls(image);
       this.updateRowControls(image);
       this.updateFormattingControls();
@@ -2059,7 +2307,10 @@
       return {
         schema_version: SCHEMA_VERSION,
         canvas: { width: this.stageWidth, height: this.stageHeight },
-        images: this.images.map((image) => ({ ...image })),
+        images: this.images.map((image) => ({
+          ...image,
+          crop: { ...this.imageCrop(image) },
+        })),
         template_frame: this.templateFrame
           ? {
             image_id: this.templateFrame.image_id,

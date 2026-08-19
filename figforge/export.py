@@ -95,6 +95,20 @@ def render_figure(
         with Image.open(source_path) as source:
             source.seek(0)
             rendered_source = _source_image(source)
+            crop = image_state.crop
+            crop_left = min(image_state.original_width - 1, max(0, round(crop.x)))
+            crop_top = min(image_state.original_height - 1, max(0, round(crop.y)))
+            crop_right = min(
+                image_state.original_width,
+                max(crop_left + 1, round(crop.x + crop.width)),
+            )
+            crop_bottom = min(
+                image_state.original_height,
+                max(crop_top + 1, round(crop.y + crop.height)),
+            )
+            crop_box = (crop_left, crop_top, crop_right, crop_bottom)
+            if crop_box != (0, 0, image_state.original_width, image_state.original_height):
+                rendered_source = rendered_source.crop(crop_box)
             target_size = (
                 max(1, round(image_state.width * scale)),
                 max(1, round(image_state.height * scale)),
