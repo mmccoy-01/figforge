@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import math
 from pathlib import Path
 from typing import Iterable
 
@@ -30,13 +31,20 @@ def export_figure(
     *,
     output_format: str,
     dpi: int,
+    trim_to_content: bool = False,
 ) -> Path:
     """Render a figure to PNG, TIFF, or raster PDF without editing sources."""
 
     normalized_format = output_format.strip().lower()
     if normalized_format not in SUPPORTED_FORMATS:
         raise FigureExportError("Export format must be PNG, TIFF, or PDF")
-    figure = render_figure(state, assets, asset_store, dpi=dpi)
+    figure = render_figure(
+        state,
+        assets,
+        asset_store,
+        dpi=dpi,
+        trim_to_content=trim_to_content,
+    )
     destination = Path(destination)
     if normalized_format == "png":
         figure.save(destination, format="PNG", dpi=(dpi, dpi), optimize=True)
@@ -63,6 +71,7 @@ def render_figure(
     asset_store: AssetStore,
     *,
     dpi: int,
+    trim_to_content: bool = False,
 ) -> Image.Image:
     """Render images and structured labels; temporary lane guides are omitted."""
 
@@ -140,7 +149,110 @@ def render_figure(
             scale,
         )
 
+    if trim_to_content:
+        left, top, right, bottom = figure_content_bounds(state)
+        crop_box = (
+            max(0, math.floor(left * scale)),
+            max(0, math.floor(top * scale)),
+            min(output_width, math.ceil(right * scale)),
+            min(output_height, math.ceil(bottom * scale)),
+        )
+        figure = figure.crop(crop_box)
+
     return figure.convert("RGB")
+
+
+def figure_content_bounds(
+    state: CanvasState,
+    *,
+    padding: float = 8,
+) -> tuple[float, float, float, float]:
+    """Return canvas-space bounds covering images, labels, and extensions."""
+
+    boxes: list[tuple[float, float, float, float]] = []
+    grids = {grid.image_id: grid for grid in state.lane_grids}
+    for image in state.images:
+        boxes.append((image.x, image.y, image.x + image.width, image.y + image.height))
+        grid = grids.get(image.image_id)
+        if grid is None:
+            continue
+        rows = [row for row in state.label_rows if row.image_id == image.image_id]
+        lane_left = image.x + image.width * grid.left
+        lane_right = image.x + image.width * grid.right
+        label_left = lane_left - 97
+
+        above_offset = 6.0
+        for row in (candidate for candidate in rows if candidate.position == "above"):
+            above_offset += row.height
+            row_top = image.y - above_offset
+            extension = max(
+                (
+                    cell.border_extension
+                    for cell in row.cells
+                    if cell.merged_into is None
+                ),
+                default=0,
+            )
+            boxes.append(
+                (
+                    label_left,
+                    row_top,
+                    lane_right,
+                    max(row_top + row.height, row_top + row.height + extension),
+                )
+            )
+
+        below_offset = 6.0
+        for row in (candidate for candidate in rows if candidate.position == "below"):
+            row_top = image.y + image.height + below_offset
+            extension = max(
+                (
+                    cell.border_extension
+                    for cell in row.cells
+                    if cell.merged_into is None
+                ),
+                default=0,
+            )
+            boxes.append(
+                (
+                    label_left,
+                    min(row_top, row_top - extension),
+                    lane_right,
+                    row_top + row.height,
+                )
+            )
+            below_offset += row.height
+
+    if not boxes:
+        raise FigureExportError("The figure has no exportable content")
+    left = max(0.0, min(box[0] for box in boxes) - padding)
+    top = max(0.0, min(box[1] for box in boxes) - padding)
+    right = min(state.width, max(box[2] for box in boxes) + padding)
+    bottom = min(state.height, max(box[3] for box in boxes) + padding)
+    if right <= left or bottom <= top:
+        raise FigureExportError("The figure content is outside the canvas")
+    return left, top, right, bottom
+
+
+def figure_export_size(
+    state: CanvasState,
+    *,
+    dpi: int,
+    trim_to_content: bool,
+) -> tuple[int, int]:
+    """Return the pixel dimensions produced by the selected export area."""
+
+    scale = dpi / SCREEN_DPI
+    if trim_to_content:
+        left, top, right, bottom = figure_content_bounds(state)
+        return (
+            max(1, math.ceil(right * scale) - math.floor(left * scale)),
+            max(1, math.ceil(bottom * scale) - math.floor(top * scale)),
+        )
+    return (
+        max(1, round(state.width * scale)),
+        max(1, round(state.height * scale)),
+    )
 
 
 def _draw_rows_for_image(
@@ -241,7 +353,7 @@ def _draw_label_row(
             row_left + row_width * (column + cell.colspan) / lane_count
         )
         cell_width = max(1, cell_right - cell_left)
-        cell_layer = Image.new("RGBA", (cell_width, row_height), "white")
+        cell_layer = Image.new("RGBA", (cell_width, row_height), cell.fill_color)
         _draw_cell(cell_layer, cell, row, column, scale)
         figure.paste(cell_layer, (cell_left, row_top), cell_layer)
         extension = max(0, round(cell.border_extension * scale))
@@ -311,7 +423,7 @@ def _draw_vertical_merged_cells(
             cell_layer = Image.new(
                 "RGBA",
                 (max(1, cell_right - cell_left), cell_height),
-                "white",
+                cell.fill_color,
             )
             _draw_cell(cell_layer, cell, row, column, scale)
             figure.paste(cell_layer, (cell_left, cell_top), cell_layer)
@@ -389,7 +501,7 @@ def _draw_cell(
         ),
         align=cell.align,
         vertical_align=cell.vertical_align,
-        color="#102523",
+        color=cell.text_color,
         padding=max(2, round(3 * scale)),
         rotation=cell.rotation,
         underline=cell.underline,
@@ -488,5 +600,7 @@ __all__ = [
     "SUPPORTED_DPI",
     "SUPPORTED_FORMATS",
     "export_figure",
+    "figure_content_bounds",
+    "figure_export_size",
     "render_figure",
 ]

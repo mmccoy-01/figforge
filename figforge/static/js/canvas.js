@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  const SCHEMA_VERSION = 8;
+  const SCHEMA_VERSION = 9;
   const MAX_LANES = 30;
   const DEFAULT_LANE_OPACITY = 0.35;
   const DEFAULT_GRID_LEFT = 0.05;
@@ -140,11 +140,31 @@
       document.getElementById("cell_underline")?.addEventListener("click", () => this.toggleCellProperty("underline"));
       document.getElementById("cell_rotation")?.addEventListener("change", (event) => this.applyCellProperty("rotation", Number(event.target.value)));
       document.getElementById("cell_border_preset")?.addEventListener("change", (event) => this.applyBorderPreset(event.target.value));
-      document.getElementById("cell_border_extension")?.addEventListener("input", (event) => {
+      document.getElementById("cell_border_extension")?.addEventListener("change", (event) => {
         const parsed = Number(event.target.value);
         const length = Math.max(0, Math.min(500, Number.isFinite(parsed) ? parsed : 0));
         event.target.value = String(length);
         this.applyCellProperty("border_extension", length);
+      });
+      document.getElementById("cell_text_color")?.addEventListener(
+        "change",
+        (event) => this.applyCellProperty("text_color", event.target.value),
+      );
+      document.getElementById("cell_fill_color")?.addEventListener(
+        "change",
+        (event) => this.applyCellProperty("fill_color", event.target.value),
+      );
+      document.getElementById("reset_cell_colors")?.addEventListener("click", () => {
+        const entries = this.selectedCellEntries();
+        if (!entries.length) return;
+        for (const { cell } of entries) {
+          cell.text_color = "#102523";
+          cell.fill_color = "#ffffff";
+        }
+        this.renderLabelRows();
+        this.updateProperties();
+        this.focusSelectedCell();
+        this.syncState();
       });
       document.getElementById("fill_lane_numbers")?.addEventListener("click", () => this.fillLaneNumbers());
       document.getElementById("repeat_pattern")?.addEventListener("click", () => this.repeatSelectedPattern());
@@ -154,6 +174,13 @@
       });
       document.getElementById("export_figure")?.addEventListener("click", () => {
         window.Shiny?.setInputValue("export_figure_request", Date.now(), { priority: "event" });
+      });
+      document.addEventListener("change", (event) => {
+        if (event.target?.id !== "export_format") return;
+        const button = document.getElementById("download_figure");
+        if (button) {
+          button.textContent = `Download ${String(event.target.value).toUpperCase()} image`;
+        }
       });
       document.getElementById("figure_name")?.addEventListener("input", (event) => {
         this.setSaveStatus({ label: "Editing…", state: "editing" });
@@ -311,6 +338,8 @@
           ...cell,
           rowspan: Number(cell.rowspan || 1),
           merged_into_row: cell.merged_into_row ?? null,
+          text_color: cell.text_color || "#102523",
+          fill_color: cell.fill_color || "#ffffff",
           border_extension: Number(cell.border_extension || 0),
           borders: { ...cell.borders },
         })),
@@ -411,6 +440,7 @@
       const image = this.selectedImage();
       if (!image || image.is_template) return;
       this.cropMode = true;
+      const grid = this.laneGrids.get(image.image_id);
       this.cropSessionStart = {
         image_id: image.image_id,
         x: image.x,
@@ -418,6 +448,7 @@
         width: image.width,
         height: image.height,
         crop: { ...this.imageCrop(image) },
+        grid: grid ? { ...grid, boundaries: [...grid.boundaries] } : null,
       };
       this.updateCropControls();
       this.draw();
@@ -438,6 +469,12 @@
           height: snapshot.height,
           crop: { ...snapshot.crop },
         });
+        if (snapshot.grid) {
+          this.laneGrids.set(
+            snapshot.image_id,
+            { ...snapshot.grid, boundaries: [...snapshot.grid.boundaries] },
+          );
+        }
       }
       this.cropMode = false;
       this.cropSessionStart = null;
@@ -472,7 +509,9 @@
     updateCropControls() {
       const image = this.selectedImage();
       const cropButton = document.getElementById("crop_tool");
-      cropButton?.toggleAttribute("disabled", !image || image.is_template);
+      if (cropButton) {
+        cropButton.disabled = !this.cropMode && (!image || image.is_template);
+      }
       cropButton?.classList.toggle("tool-button--active", this.cropMode);
       if (cropButton) {
         const label = cropButton.querySelector("span:last-child");
@@ -743,6 +782,12 @@
             startPoint: point,
             start: { ...selected, crop: { ...this.imageCrop(selected) } },
             fullBounds: this.fullImageBounds(selected),
+            gridBounds: grid
+              ? {
+                left: selected.x + selected.width * grid.left,
+                right: selected.x + selected.width * grid.right,
+              }
+              : null,
           };
           this.canvas.setPointerCapture(event.pointerId);
           event.preventDefault();
@@ -798,6 +843,7 @@
           image,
           this.interaction.start,
           this.interaction.fullBounds,
+          this.interaction.gridBounds,
           this.interaction.handle,
           deltaX,
           deltaY,
@@ -842,7 +888,7 @@
       };
     }
 
-    cropFromHandle(image, start, fullBounds, handle, deltaX, deltaY) {
+    cropFromHandle(image, start, fullBounds, gridBounds, handle, deltaX, deltaY) {
       const startRight = start.x + start.width;
       const startBottom = start.y + start.height;
       let left = start.x;
@@ -883,6 +929,15 @@
           (bottom - top) / fullBounds.height * image.original_height,
         ),
       };
+      const grid = this.laneGrids.get(image.image_id);
+      if (grid && gridBounds && image.width > 0) {
+        const gridLeft = Math.max(image.x, Math.min(image.x + image.width, gridBounds.left));
+        const gridRight = Math.max(image.x, Math.min(image.x + image.width, gridBounds.right));
+        if (gridRight - gridLeft >= MIN_GRID_SPAN * image.width) {
+          grid.left = (gridLeft - image.x) / image.width;
+          grid.right = (gridRight - image.x) / image.width;
+        }
+      }
     }
 
     resizeFromHandle(image, start, handle, deltaX, deltaY) {
@@ -1013,9 +1068,6 @@
       }
       for (const image of this.images) {
         const element = this.imageElements.get(image.image_id);
-        if (element && this.cropMode && image.image_id === this.selectedId) {
-          this.drawFullCropPreview(element, image);
-        }
         if (element) this.drawCroppedImage(element, image);
         const grid = this.laneGrids.get(image.image_id);
         if (grid?.visible) this.drawLaneGrid(image, grid, image.image_id === this.selectedId);
@@ -1044,14 +1096,6 @@
         image.width,
         image.height,
       );
-    }
-
-    drawFullCropPreview(element, image) {
-      const bounds = this.fullImageBounds(image);
-      this.context.save();
-      this.context.globalAlpha = 0.24;
-      this.context.drawImage(element, bounds.x, bounds.y, bounds.width, bounds.height);
-      this.context.restore();
     }
 
     drawTemplateFrame(frame) {
@@ -1185,7 +1229,8 @@
         ? image.is_template ? "Blank template surface" : image.filename
         : "Nothing selected";
       document.getElementById("fit_image")?.toggleAttribute("disabled", !image);
-      document.getElementById("delete_image")?.toggleAttribute("disabled", !image || image.is_template);
+      const deleteButton = document.getElementById("delete_image");
+      if (deleteButton) deleteButton.disabled = !image || Boolean(image.is_template);
       document.getElementById("add_row")?.toggleAttribute("disabled", !image);
       this.updateCropControls();
       this.updateLaneControls(image);
@@ -1325,6 +1370,8 @@
         italic: false,
         underline: false,
         rotation: 0,
+        text_color: "#102523",
+        fill_color: "#ffffff",
         border_extension: 0,
         borders: { top: true, right: true, bottom: true, left: true },
       };
@@ -1473,6 +1520,8 @@
         italic: cell.italic,
         underline: cell.underline,
         rotation: cell.rotation,
+        text_color: cell.text_color,
+        fill_color: cell.fill_color,
         border_extension: cell.border_extension,
         borders: cell.borders,
       }));
@@ -1545,7 +1594,11 @@
       element.style.fontStyle = cell.italic ? "italic" : "normal";
       element.style.textDecoration = cell.underline ? "underline" : "none";
       element.style.writingMode = cell.rotation === 0 ? "horizontal-tb" : "vertical-rl";
+      element.style.textOrientation = "mixed";
       element.style.transform = cell.rotation === -90 ? "rotate(180deg)" : "none";
+      element.style.transformOrigin = "center";
+      element.style.color = cell.text_color || "#102523";
+      element.style.backgroundColor = cell.fill_color || "#ffffff";
       const visibleBorders = {
         top: cell.borders.top,
         right: row.cells[column + cell.colspan - 1].borders.right,
@@ -1595,7 +1648,10 @@
     renderVerticalMergedCells() {
       const overlay = document.getElementById("label_grid_overlay");
       if (!overlay) return;
-      overlay.querySelectorAll(".vertical-merged-cell").forEach((cell) => cell.remove());
+      const expectedCells = new Set();
+      overlay.querySelectorAll(".label-row.has-vertical-merge").forEach(
+        (row) => row.classList.remove("has-vertical-merge"),
+      );
       for (const image of this.surfaces()) {
         const grid = this.laneGrids.get(image.image_id);
         if (!grid) continue;
@@ -1608,22 +1664,39 @@
               .map((candidate) => overlay.querySelector(`[data-label-row="${candidate.row_id}"]`))
               .filter(Boolean);
             if (rowElements.length !== cell.rowspan) return;
+            const anchorRowElement = rowElements[0];
             const tops = rowElements.map((element) => Number.parseFloat(element.style.top || "0"));
             const bottoms = rowElements.map(
               (element, index) => tops[index] + spannedRows[index].height,
             );
-            const left = image.x + image.width * grid.left;
             const width = image.width * (grid.right - grid.left);
-            const cellElement = this.createCellElement(row, cell, column);
-            cellElement.classList.add("vertical-merged-cell");
-            cellElement.style.left = `${left + width * column / row.cells.length}px`;
-            cellElement.style.top = `${Math.min(...tops)}px`;
+            const cellKey = `${row.row_id}:${column}`;
+            expectedCells.add(cellKey);
+            let cellElement = overlay.querySelector(
+              `.vertical-merged-cell[data-row-id="${row.row_id}"][data-column="${column}"]`,
+            );
+            if (!cellElement) {
+              cellElement = this.createCellElement(row, cell, column);
+              cellElement.classList.add("vertical-merged-cell");
+            } else if (cellElement.contentEditable !== "true") {
+              cellElement.textContent = cell.text;
+              this.applyCellElementStyle(cellElement, cell, row, column);
+            }
+            cellElement.style.left = `${width * column / row.cells.length}px`;
+            cellElement.style.top = `${Math.min(...tops) - tops[0]}px`;
             cellElement.style.width = `${width * cell.colspan / row.cells.length}px`;
             cellElement.style.height = `${Math.max(...bottoms) - Math.min(...tops)}px`;
-            overlay.append(cellElement);
+            anchorRowElement.classList.add("has-vertical-merge");
+            if (cellElement.parentElement !== anchorRowElement) {
+              anchorRowElement.append(cellElement);
+            }
           });
         });
       }
+      overlay.querySelectorAll(".vertical-merged-cell").forEach((cellElement) => {
+        const key = `${cellElement.dataset.rowId}:${cellElement.dataset.column}`;
+        if (!expectedCells.has(key)) cellElement.remove();
+      });
     }
 
     renderBorderExtensions() {
@@ -1704,20 +1777,21 @@
       this.draggingSelection = true;
     }
 
+    handleCellDoubleClick(event) {
+      const cell = event.target.closest(".label-cell");
+      if (!cell) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.draggingSelection = false;
+      this.beginCellEdit(cell.dataset.rowId, Number(cell.dataset.column));
+    }
+
     handleCellPointerOver(event) {
       if (!this.draggingSelection) return;
       const cell = event.target.closest(".label-cell");
       if (!cell) return;
       event.preventDefault();
       this.selectCell(cell.dataset.rowId, Number(cell.dataset.column), false, true);
-    }
-
-    handleCellDoubleClick(event) {
-      const cell = event.target.closest(".label-cell");
-      if (!cell) return;
-      event.preventDefault();
-      event.stopPropagation();
-      this.beginCellEdit(cell.dataset.rowId, Number(cell.dataset.column));
     }
 
     handleCellKeyDown(event) {
@@ -1739,6 +1813,15 @@
           event.stopPropagation();
           this.finishEditing(true);
           this.moveCellSelection(event.key === "Tab" ? (event.shiftKey ? -1 : 1) : 0, event.key === "Enter" ? 1 : 0);
+          return;
+        }
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+          event.preventDefault();
+          event.stopPropagation();
+          const horizontal = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+          const vertical = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+          this.finishEditing(true);
+          this.moveCellSelection(horizontal, vertical, event.shiftKey);
         }
         return;
       }
@@ -1937,9 +2020,13 @@
     }
 
     beginCellEdit(rowId, column, initialText = null) {
+      const resolved = this.resolveCellAnchor(rowId, column);
+      if (!resolved) return;
+      rowId = resolved.row.row_id;
+      column = resolved.column;
       this.selectCell(rowId, column, false);
       const cell = this.cellElement(rowId, column);
-      const row = this.labelRows.find((candidate) => candidate.row_id === rowId);
+      const row = resolved.row;
       if (!cell || !row) return;
       this.editingCell = { rowId, col: column, original: row.cells[column].text };
       if (initialText !== null) {
@@ -2240,7 +2327,7 @@
       const entries = this.selectedCellEntries();
       const active = entries.length > 0;
       const focused = this.selectedRow()?.cells[this.selectedCell?.col] || null;
-      for (const id of ["align_left", "align_center", "align_right", "cell_bold", "cell_italic", "cell_underline", "cell_font_size", "cell_rotation", "cell_border_preset", "cell_border_extension", "cell_borders", "rotate_object"]) {
+      for (const id of ["align_left", "align_center", "align_right", "cell_bold", "cell_italic", "cell_underline", "cell_font_size", "cell_rotation", "cell_text_color", "cell_fill_color", "reset_cell_colors", "cell_border_preset", "cell_border_extension", "cell_borders", "rotate_object"]) {
         document.getElementById(id)?.toggleAttribute("disabled", !active);
       }
       const merge = document.getElementById("merge_cells");
@@ -2259,10 +2346,14 @@
       }
       const fontSize = document.getElementById("cell_font_size");
       const rotation = document.getElementById("cell_rotation");
+      const textColor = document.getElementById("cell_text_color");
+      const fillColor = document.getElementById("cell_fill_color");
       const borders = document.getElementById("cell_border_preset");
       const borderExtension = document.getElementById("cell_border_extension");
       if (fontSize && focused) fontSize.value = String(focused.font_size);
       if (rotation && focused) rotation.value = String(focused.rotation);
+      if (textColor && focused) textColor.value = focused.text_color || "#102523";
+      if (fillColor && focused) fillColor.value = focused.fill_color || "#ffffff";
       if (borderExtension && focused) {
         borderExtension.value = String(focused.border_extension || 0);
       }

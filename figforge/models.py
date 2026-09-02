@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 
-SCHEMA_VERSION = 8
-LEGACY_SCHEMA_VERSIONS = {5, 6, 7}
+SCHEMA_VERSION = 9
+LEGACY_SCHEMA_VERSIONS = {5, 6, 7, 8}
 MAX_LANES = 30
 VALID_HORIZONTAL_ALIGNMENTS = {"left", "center", "right"}
 VALID_VERTICAL_ALIGNMENTS = {"top", "middle", "bottom"}
 VALID_ROTATIONS = {-90, 0, 90}
+HEX_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +196,8 @@ class LabelCellState:
     italic: bool = False
     underline: bool = False
     rotation: int = 0
+    text_color: str = "#102523"
+    fill_color: str = "#ffffff"
     border_extension: float = 0
     borders: CellBorders = CellBorders()
 
@@ -218,6 +222,8 @@ class LabelCellState:
             italic=bool(value.get("italic", False)),
             underline=bool(value.get("underline", False)),
             rotation=int(value.get("rotation", 0)),
+            text_color=str(value.get("text_color", "#102523")),
+            fill_color=str(value.get("fill_color", "#ffffff")),
             border_extension=float(value.get("border_extension", 0)),
             borders=CellBorders.from_mapping(value.get("borders", {})),
         )
@@ -233,6 +239,10 @@ class LabelCellState:
             raise ValueError("Cell font size must be between 6 and 72")
         if cell.rotation not in VALID_ROTATIONS:
             raise ValueError("Cell rotation must be -90, 0, or 90 degrees")
+        if not HEX_COLOR_PATTERN.fullmatch(cell.text_color):
+            raise ValueError("Cell text color must be a six-digit hex color")
+        if not HEX_COLOR_PATTERN.fullmatch(cell.fill_color):
+            raise ValueError("Cell fill color must be a six-digit hex color")
         if not 0 <= cell.border_extension <= 500:
             raise ValueError("Cell border extension must be between 0 and 500 pixels")
         return cell

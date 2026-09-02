@@ -73,6 +73,9 @@ def test_ui_builds_with_shiny() -> None:
     assert 'id="label_row_height"' in rendered
     assert 'id="cell_font_size"' in rendered
     assert 'id="cell_rotation"' in rendered
+    assert 'id="cell_text_color"' in rendered
+    assert 'id="cell_fill_color"' in rendered
+    assert 'id="reset_cell_colors"' in rendered
     assert 'id="cell_border_preset"' in rendered
     assert 'id="cell_border_extension"' in rendered
     assert 'id="align_left"' in rendered
@@ -88,6 +91,7 @@ def test_ui_builds_with_shiny() -> None:
     assert 'id="save_version"' not in rendered
     assert 'id="export_figure"' in rendered
     assert 'id="download_project"' in rendered
+    assert "Download .figforge project" in rendered
     assert 'id="project_upload"' in rendered
     assert 'id="start_blank_template"' in rendered
     assert 'id="new_project"' in rendered

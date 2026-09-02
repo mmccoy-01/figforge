@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "figforge"
-version = "0.13.0b1"
+version = "0.14.0b1"
 description = "A scientific figure assembly app for lane-based images"
 readme = "README.md"
 requires-python = ">=3.11"

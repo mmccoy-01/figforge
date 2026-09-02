@@ -19,7 +19,8 @@ label-grid editing, undo/redo state, and same-browser recovery.
 - `figforge:add-asset` (Shiny → browser): validated asset ID, immutable source
   URL, browser-display URL, filename, and original dimensions.
 - `canvas_state` (browser → Shiny): canvas dimensions and every image's source
-  reference, transform, crop, lane grid, and lane-aligned label rows.
+  reference, transform, crop, lane grid, and lane-aligned label rows, including
+  text and cell-fill colors.
 - `project_name_change` (browser → Shiny): current figure name for project and
   export filenames.
 - `figforge:load-project` (Shiny → browser): validated canvas state with remapped
@@ -32,7 +33,7 @@ label-grid editing, undo/redo state, and same-browser recovery.
 - `figforge:recovery-complete` / `figforge:recovery-error` (Shiny → browser):
   completes the recovery workflow after validation and asset remapping.
 - `export_figure_request` (browser → Shiny): opens validated PNG, TIFF, and PDF
-  export controls.
+  export controls with tight-content or full-canvas bounds.
 
 ## Source layout
 

@@ -1,6 +1,6 @@
 # FigForge — Next Steps
 
-FigForge `0.13.0-beta.1` is a feature-complete public beta candidate for the
+FigForge `0.14.0-beta.1` is a feature-complete public beta candidate for the
 focused Upload & Label workflow. The original implementation specification is
 archived in [`docs/INITIAL_PRODUCT_SPEC.md`](docs/INITIAL_PRODUCT_SPEC.md).
 
@@ -13,11 +13,13 @@ archived in [`docs/INITIAL_PRODUCT_SPEC.md`](docs/INITIAL_PRODUCT_SPEC.md).
 - [x] Uniform guides and structured labels for 1–30 lanes.
 - [x] Keyboard cell navigation and spreadsheet paste.
 - [x] Horizontal and vertical rectangular merge/unmerge.
-- [x] Text, alignment, rotation, border, row-height, and border-extension tools.
+- [x] Text, alignment, text/fill color, rotation, border, row-height, and
+      border-extension tools.
 - [x] Image-independent `.figforge` templates.
 - [x] Portable `.figforge` project download and reopen.
 - [x] Same-browser IndexedDB refresh/session recovery.
-- [x] PNG, TIFF, and PDF publication export at 300 or 600 DPI.
+- [x] PNG, TIFF, and PDF publication export at 300 or 600 DPI with tight-content
+      and full-canvas bounds.
 - [x] Focused hosted UI without Quantification, My Figures, or Save Version.
 - [x] Official application artwork and beta documentation.
 
@@ -35,9 +37,9 @@ Complete these checks against the exact Git commit used for the beta tag:
 7. [ ] Compare every export format and DPI option against its source image.
 8. [ ] Verify the app icon, favicon, GitHub link, and README on GitHub.
 9. [ ] Review deployment logs and browser console output for uncaught errors.
-10. [ ] Choose and add an explicit software license before inviting outside
-        reuse or contributions.
-11. [ ] Create the GitHub prerelease tag `v0.13.0-beta.1` and use the changelog
+10. [x] Add the MIT software license before inviting outside reuse or
+        contributions.
+11. [ ] Create the GitHub prerelease tag `v0.14.0-beta.1` and use the changelog
         entry as the release notes.
 
 ## Beta feedback priorities

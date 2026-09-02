@@ -109,7 +109,7 @@ def _asset_panel():
             ui.tags.div(
                 ui.download_button(
                     "download_project",
-                    "Download project",
+                    "Download .figforge project",
                     class_="wide-button portable-download",
                 ),
                 ui.tags.div(
@@ -263,6 +263,39 @@ def _properties_panel():
                             aria_label="Text rotation",
                         ),
                         class_="select-placeholder",
+                    ),
+                    ui.tags.div(
+                        ui.tags.label(
+                            ui.tags.span("Text color"),
+                            ui.tags.input(
+                                id="cell_text_color",
+                                type="color",
+                                value="#102523",
+                                disabled=True,
+                                aria_label="Cell text color",
+                            ),
+                            class_="cell-color-field",
+                        ),
+                        ui.tags.label(
+                            ui.tags.span("Cell fill"),
+                            ui.tags.input(
+                                id="cell_fill_color",
+                                type="color",
+                                value="#ffffff",
+                                disabled=True,
+                                aria_label="Cell fill color",
+                            ),
+                            class_="cell-color-field",
+                        ),
+                        ui.tags.button(
+                            "Reset",
+                            id="reset_cell_colors",
+                            type="button",
+                            class_="lane-action cell-color-reset",
+                            disabled=True,
+                            title="Restore the default text and cell colors",
+                        ),
+                        class_="cell-color-controls",
                     ),
                     class_="property-stack",
                 ),

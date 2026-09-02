@@ -60,7 +60,7 @@ wheels = [
 
 [[package]]
 name = "figforge"
-version = "0.13.0b1"
+version = "0.14.0b1"
 source = { editable = "." }
 dependencies = [
     { name = "pillow" },

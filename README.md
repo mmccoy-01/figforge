@@ -9,7 +9,7 @@
   Western blots, gels, and other lane-based images.
 </p>
 
-> **Beta:** This repository contains FigForge `0.13.0-beta.1`. Keep the original
+> **Beta:** This repository contains FigForge `0.14.0-beta.1`. Keep the original
 > scientific images and download `.figforge` checkpoints regularly. Please report
 > problems through [GitHub Issues](https://github.com/mmccoy-01/figforge/issues).
 
@@ -27,12 +27,13 @@ grid. It is designed for figures containing up to 30 lanes.
   Google Sheets.
 - Navigate cells with the keyboard; format, merge, and unmerge rectangular ranges
   horizontally or vertically.
-- Apply alignment, font styling, rotation, borders, row height, and vertical
-  border extensions toward the image.
+- Apply alignment, font styling, text and cell-fill colors, rotation, borders,
+  row height, and vertical border extensions toward the image.
 - Start without an image to create a reusable lane-label template.
 - Download and reopen portable `.figforge` projects containing the layout and
   copies of the immutable source assets.
-- Export publication output as PNG, TIFF, or PDF at 300 or 600 DPI.
+- Export publication output as PNG, TIFF, or PDF at 300 or 600 DPI, using either
+  tight content bounds or the full canvas.
 
 Lane guides, selection outlines, resize handles, and the editing background are
 never included in publication exports.
@@ -77,7 +78,7 @@ pytest
 3. Add label rows above or below the image.
 4. Enter values directly or paste cells copied from a spreadsheet.
 5. Select ranges to merge cells or apply text and border formatting.
-6. Choose **Download project** to create a durable `.figforge` checkpoint.
+6. Choose **Download .figforge project** to create a durable project checkpoint.
 7. Use **Export** to render a clean PNG, TIFF, or PDF figure.
 
 Use **Open project** to resume a downloaded project or template. A template made
@@ -102,7 +103,7 @@ is cleared, private browsing is used, or storage is evicted. Download `.figforge
 checkpoints at meaningful milestones.
 
 The header **Save** action marks the active session draft as saved. It is not a
-substitute for **Download project** on Connect Cloud.
+substitute for **Download .figforge project** on Connect Cloud.
 
 ## Deploy to Posit Connect Cloud
 

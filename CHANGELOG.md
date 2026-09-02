@@ -2,6 +2,33 @@
 
 All notable changes to FigForge are documented here.
 
+## 0.14.0-beta.1 — 2026-09-02
+
+### Added
+
+- Per-cell text color and background fill controls, including multi-cell
+  formatting and a one-click color reset.
+- Tight-content publication export that removes unused canvas margins while
+  retaining images, label rows, row names, and border extensions.
+
+### Fixed
+
+- Arrow-key cell navigation now works directly from an active text editor.
+- Vertically merged cells now retain a stable focus target and accept text.
+- Border extensions remain visible and accept multi-digit lengths without the
+  selected cell stealing focus after the first digit.
+- Crop mode removes trimmed pixels, preserves lane-label placement when the
+  cropped margin is outside the lane region, and keeps its **Done** action
+  enabled so the crop can be committed.
+- Figure downloads are explicitly labeled as image downloads and use the
+  selected PNG, TIFF, or PDF filename and media type; project downloads are
+  clearly labeled as `.figforge` files.
+
+### Compatibility
+
+- Canvas schema 9 stores cell colors. Schema 5–8 projects remain readable and
+  receive the default text and fill colors during migration.
+
 ## 0.13.0-beta.1 — 2026-08-18
 
 First public beta candidate.

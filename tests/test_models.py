@@ -19,6 +19,8 @@ def valid_cell(text: str = "") -> dict:
         "italic": False,
         "underline": False,
         "rotation": 0,
+        "text_color": "#102523",
+        "fill_color": "#ffffff",
         "border_extension": 0.0,
         "borders": {"top": True, "right": True, "bottom": True, "left": True},
     }
@@ -114,6 +116,21 @@ def test_schema_seven_projects_migrate_to_full_source_crop() -> None:
     assert state.images[0].crop.y == 0
     assert state.images[0].crop.width == 1200
     assert state.images[0].crop.height == 300
+
+
+def test_schema_eight_projects_migrate_to_default_cell_colors() -> None:
+    payload = valid_state()
+    payload["schema_version"] = 8
+    for row in payload["label_rows"]:
+        for cell in row["cells"]:
+            cell.pop("text_color")
+            cell.pop("fill_color")
+
+    state = CanvasState.from_mapping(payload)
+
+    assert state.schema_version == SCHEMA_VERSION
+    assert state.label_rows[0].cells[0].text_color == "#102523"
+    assert state.label_rows[0].cells[0].fill_color == "#ffffff"
 
 
 def test_crop_must_remain_inside_original_image() -> None:
@@ -269,6 +286,15 @@ def test_label_cell_formatting_is_validated() -> None:
     payload["label_rows"][0]["cells"][0]["rotation"] = 45
 
     with pytest.raises(ValueError, match="rotation must be"):
+        CanvasState.from_mapping(payload)
+
+
+@pytest.mark.parametrize("property_name", ["text_color", "fill_color"])
+def test_label_cell_colors_require_six_digit_hex(property_name: str) -> None:
+    payload = valid_state()
+    payload["label_rows"][0]["cells"][0][property_name] = "red"
+
+    with pytest.raises(ValueError, match="six-digit hex color"):
         CanvasState.from_mapping(payload)
 
 

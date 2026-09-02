@@ -7,7 +7,12 @@ import pytest
 from PIL import Image
 
 from figforge.assets import AssetRecord, AssetStore
-from figforge.export import FigureExportError, export_figure, render_figure
+from figforge.export import (
+    FigureExportError,
+    export_figure,
+    figure_export_size,
+    render_figure,
+)
 from figforge.models import CanvasState, SCHEMA_VERSION
 
 
@@ -137,6 +142,50 @@ def test_vertical_cell_border_extension_is_included_in_export(tmp_path: Path) ->
     pixel = rendered.getpixel((31, 134))
     assert pixel != (255, 255, 255)
     assert max(pixel) - min(pixel) < 45
+
+
+def test_cell_fill_and_text_colors_are_included_in_export(tmp_path: Path) -> None:
+    store, asset, state = export_fixture(tmp_path)
+    payload = state.to_dict()
+    cell = payload["label_rows"][0]["cells"][0]
+    cell.update(
+        {
+            "text": "",
+            "text_color": "#123456",
+            "fill_color": "#f2c94c",
+            "borders": {"top": False, "right": False, "bottom": False, "left": False},
+        }
+    )
+    colored_state = CanvasState.from_mapping(payload)
+
+    rendered = render_figure(colored_state, (asset,), store, dpi=300)
+
+    red, green, blue = rendered.getpixel((62, 175))
+    assert red > 225
+    assert 180 < green < 220
+    assert blue < 100
+
+
+def test_tight_export_removes_unused_canvas_space(tmp_path: Path) -> None:
+    store, asset, state = export_fixture(tmp_path)
+    destination = tmp_path / "tight.png"
+
+    expected_size = figure_export_size(state, dpi=300, trim_to_content=True)
+    export_figure(
+        state,
+        (asset,),
+        store,
+        destination,
+        output_format="png",
+        dpi=300,
+        trim_to_content=True,
+    )
+
+    with Image.open(destination) as exported:
+        assert exported.format == "PNG"
+        assert exported.size == expected_size
+        assert exported.width < 300
+        assert exported.height < 250
 
 
 def test_vertical_merge_exports_as_one_cell_without_an_internal_row_border(

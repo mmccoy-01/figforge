@@ -8,14 +8,21 @@ Use synthetic, public, or redacted images when filing public reports.
 2. Set the lane count to 30, show the guides, and adjust both outer boundaries.
 3. Add rows above and below the image.
 4. Paste a multirow, tab-separated block copied from a spreadsheet.
-5. Move between cells with Tab, Shift+Tab, and the arrow keys.
+5. Move between cells with Tab, Shift+Tab, and the arrow keys, including while
+   a cell's text editor is active.
 6. Clear one cell with Backspace and confirm the image remains on the canvas.
-7. Merge and unmerge both a horizontal range and a rectangular multi-row range.
-8. Apply text rotation, font styling, borders, and a border extension.
-9. Crop the image, reset the crop, then apply a second crop.
+7. Merge and unmerge both a horizontal range and a rectangular multi-row range;
+   type in the vertically merged result.
+8. Apply text rotation, font styling, text color, cell fill, borders, and a
+   multi-digit border extension. Confirm the extension reaches toward the image.
+9. Crop outside the lane region and confirm the label columns stay aligned.
+   Crop into the lane region, confirm removed pixels disappear, reset the crop,
+   then apply a second crop with **Done**.
 10. Delete the image and restore it with Ctrl/Cmd+Z.
 11. Download the project, start a new project, and reopen the `.figforge` file.
 12. Export PNG, TIFF, and PDF and compare each result with the editor and source.
+    Test both **Tight content** and **Full canvas**, and confirm the downloaded
+    extensions match the selected formats rather than `.figforge`.
 
 ## Template test
 

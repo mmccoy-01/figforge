@@ -14,7 +14,11 @@ from pathlib import Path
 from shiny import App, Inputs, Outputs, Session, reactive, render, ui
 
 from figforge.assets import AssetStore, AssetValidationError
-from figforge.export import FigureExportError, export_figure as write_figure_export
+from figforge.export import (
+    FigureExportError,
+    export_figure as write_figure_export,
+    figure_export_size,
+)
 from figforge.models import CanvasState
 from figforge.persistence import (
     ProjectBundleError,
@@ -74,6 +78,9 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         except (TypeError, ValueError):
             return 300
         return value if value in {300, 600} else 300
+
+    def trim_export_to_content() -> bool:
+        return input.export_bounds() != "canvas"
 
     @output
     @render.ui
@@ -522,13 +529,24 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                         selected="300",
                         inline=True,
                     ),
+                    ui.input_radio_buttons(
+                        "export_bounds",
+                        "Area",
+                        {
+                            "tight": "Tight content",
+                            "canvas": "Full canvas",
+                        },
+                        selected="tight",
+                        inline=True,
+                    ),
                     class_="export-option-grid",
                 ),
                 ui.tags.div(
                     ui.tags.strong("Clean publication output"),
                     ui.tags.p(
                         "Temporary lane guides, selection outlines, and resize "
-                        "handles are always excluded."
+                        "handles are always excluded. Tight content removes unused "
+                        "canvas space. This downloads an image, not a .figforge project."
                     ),
                     class_="export-clean-note",
                 ),
@@ -539,7 +557,7 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 ),
                 ui.download_button(
                     "download_figure",
-                    "Download figure",
+                    "Download PNG image",
                     class_="wide-button wide-button--accent export-download-button",
                 ),
                 title="Export Figure",
@@ -627,8 +645,11 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
     def export_dimensions():
         dpi = selected_export_dpi()
         state = canvas_state()
-        width = max(1, round(state.width * dpi / 96))
-        height = max(1, round(state.height * dpi / 96))
+        width, height = figure_export_size(
+            state,
+            dpi=dpi,
+            trim_to_content=trim_export_to_content(),
+        )
         return f"Output: {width:,} × {height:,} px at {dpi} DPI"
 
     @output
@@ -636,7 +657,11 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         filename=lambda: (
             f"{_safe_download_name(project_name())}.{selected_export_format()}"
         ),
-        media_type="application/octet-stream",
+        media_type=lambda: {
+            "png": "image/png",
+            "tiff": "image/tiff",
+            "pdf": "application/pdf",
+        }[selected_export_format()],
     )
     def download_figure():
         output_format = selected_export_format()
@@ -651,6 +676,7 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                     destination,
                     output_format=output_format,
                     dpi=dpi,
+                    trim_to_content=trim_export_to_content(),
                 )
             except FigureExportError as exc:
                 ui.notification_show(str(exc), type="error", duration=6)
