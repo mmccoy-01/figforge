@@ -578,46 +578,52 @@
 
     undo() {
       const command = this.undoStack.pop();
-      if (!command || command.type !== "delete-image") return;
+      if (!command) return;
       this.isApplyingHistory = true;
-      this.images.splice(
-        Math.min(command.imageIndex, this.images.length),
-        0,
-        { ...command.image },
-      );
-      if (command.imageElement) {
-        this.imageElements.set(command.image.image_id, command.imageElement);
-      } else {
-        const element = new Image();
-        element.decoding = "async";
-        element.onload = () => {
-          this.imageElements.set(command.image.image_id, element);
-          this.draw();
-        };
-        element.src = command.image.display_url;
-      }
-      if (command.grid) {
-        this.laneGrids.set(
-          command.image.image_id,
-          { ...command.grid, boundaries: [...command.grid.boundaries] },
-        );
-      }
-      for (const item of command.rows) {
-        this.labelRows.splice(
-          Math.min(item.index, this.labelRows.length),
+      if (command.type === "delete-image") {
+        this.images.splice(
+          Math.min(command.imageIndex, this.images.length),
           0,
-          {
-            ...item.row,
-            cells: item.row.cells.map((cell) => ({
-              ...cell,
-              borders: { ...cell.borders },
-            })),
-          },
+          { ...command.image },
         );
+        if (command.imageElement) {
+          this.imageElements.set(command.image.image_id, command.imageElement);
+        } else {
+          const element = new Image();
+          element.decoding = "async";
+          element.onload = () => {
+            this.imageElements.set(command.image.image_id, element);
+            this.draw();
+          };
+          element.src = command.image.display_url;
+        }
+        if (command.grid) {
+          this.laneGrids.set(
+            command.image.image_id,
+            { ...command.grid, boundaries: [...command.grid.boundaries] },
+          );
+        }
+        for (const item of command.rows) {
+          this.labelRows.splice(
+            Math.min(item.index, this.labelRows.length),
+            0,
+            {
+              ...item.row,
+              cells: item.row.cells.map((cell) => ({
+                ...cell,
+                borders: { ...cell.borders },
+              })),
+            },
+          );
+        }
+        this.selectedId = command.image.image_id;
+      } else if (command.type === "label-edit") {
+        this.restoreLabelState(command.before);
+        this.focusSelectedCell();
       }
-      this.selectedId = command.image.image_id;
       this.redoStack.push(command);
       this.renderLabelRows();
+      this.updateCellSelection();
       this.draw();
       this.updateProperties();
       this.updateHistoryControls();
@@ -627,9 +633,18 @@
 
     redo() {
       const command = this.redoStack.pop();
-      if (!command || command.type !== "delete-image") return;
+      if (!command) return;
       this.isApplyingHistory = true;
-      this.applyDeleteCommand(command);
+      if (command.type === "delete-image") {
+        this.applyDeleteCommand(command);
+      } else if (command.type === "label-edit") {
+        this.restoreLabelState(command.after);
+        this.renderLabelRows();
+        this.updateCellSelection();
+        this.focusSelectedCell();
+        this.draw();
+        this.updateProperties();
+      }
       this.undoStack.push(command);
       this.updateHistoryControls();
       this.syncState(true);
@@ -645,6 +660,42 @@
         "disabled",
         this.redoStack.length === 0,
       );
+    }
+
+    snapshotLabelState() {
+      return {
+        rows: this.labelRows.map((row) => ({
+          ...row,
+          cells: row.cells.map((cell) => ({ ...cell, borders: { ...cell.borders } })),
+        })),
+        selectedId: this.selectedId,
+        selectedCell: this.selectedCell ? { ...this.selectedCell } : null,
+        selectionAnchor: this.selectionAnchor ? { ...this.selectionAnchor } : null,
+      };
+    }
+
+    restoreLabelState(snapshot) {
+      this.labelRows = snapshot.rows.map((row) => ({
+        ...row,
+        cells: row.cells.map((cell) => ({ ...cell, borders: { ...cell.borders } })),
+      }));
+      this.selectedId = snapshot.selectedId;
+      this.selectedCell = snapshot.selectedCell ? { ...snapshot.selectedCell } : null;
+      this.selectionAnchor = snapshot.selectionAnchor ? { ...snapshot.selectionAnchor } : null;
+    }
+
+    beginLabelHistory() {
+      return this.snapshotLabelState();
+    }
+
+    commitLabelHistory(before) {
+      const after = this.snapshotLabelState();
+      if (JSON.stringify(before.rows) !== JSON.stringify(after.rows)) {
+        this.undoStack.push({ type: "label-edit", before, after });
+        this.redoStack = [];
+        this.updateHistoryControls();
+      }
+      this.syncState(true);
     }
 
     select(imageId) {
@@ -1277,6 +1328,7 @@
     addLabelRow(position) {
       const image = this.selectedImage();
       if (!image) return;
+      const before = this.beginLabelHistory();
       const grid = this.selectedGrid() || this.createLaneGrid(image, false);
       const row = this.createLabelRow(image.image_id, position, grid.lane_count);
       this.labelRows.push(row);
@@ -1287,7 +1339,7 @@
       this.draw();
       this.updateProperties();
       this.focusSelectedCell();
-      this.syncState();
+      this.commitLabelHistory(before);
     }
 
     createLabelRow(imageId, position, laneCount) {
@@ -1305,14 +1357,22 @@
     deleteSelectedRow() {
       const row = this.selectedRow();
       if (!row) return;
+      const bounds = this.selectionBounds();
+      const rowsToDelete = bounds ? bounds.rows.slice(bounds.top, bounds.bottom + 1) : [row];
+      const deleteIds = new Set(rowsToDelete.map((candidate) => candidate.row_id));
+      const before = this.beginLabelHistory();
       this.finishEditing(true);
       this.clearMergesForImage(row.image_id);
-      this.labelRows = this.labelRows.filter((candidate) => candidate.row_id !== row.row_id);
+      this.labelRows = this.labelRows.filter((candidate) => !deleteIds.has(candidate.row_id));
       this.selectedCell = null;
       this.selectionAnchor = null;
       this.renderLabelRows();
       this.updateProperties();
-      this.syncState();
+      this.commitLabelHistory(before);
+      this.showLabelStatus(
+        deleteIds.size > 1 ? `Deleted ${deleteIds.size} rows.` : "Deleted row.",
+        "success",
+      );
     }
 
     renameSelectedRow(name) {
@@ -1800,6 +1860,16 @@
       const rowId = cell.dataset.rowId;
       const column = Number(cell.dataset.column);
       const editing = cell.contentEditable === "true";
+      const commandKey = event.ctrlKey || event.metaKey;
+
+      if (commandKey && event.shiftKey && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.finishEditing(true);
+        this.selectCell(rowId, column, false);
+        this.pasteHorizontalFromClipboard();
+        return;
+      }
 
       if (editing) {
         if (event.key === "Escape") {
@@ -1911,6 +1981,7 @@
         }
       }
 
+      const before = this.beginLabelHistory();
       const startRow = imageRows[startRowIndex];
       while (imageRows.length < startRowIndex + matrix.length) {
         const newRow = this.createLabelRow(this.selectedId, startRow.position, startRow.cells.length);
@@ -1933,9 +2004,67 @@
       this.draw();
       this.updateProperties();
       this.focusSelectedCell();
-      this.syncState();
+      this.commitLabelHistory(before);
       this.showLabelStatus(
         `Pasted ${populated} cell${populated === 1 ? "" : "s"} across ${matrix.length} row${matrix.length === 1 ? "" : "s"}.`,
+        "success",
+      );
+    }
+
+    pasteHorizontalFromClipboard() {
+      if (!navigator.clipboard?.readText) {
+        this.showLabelStatus("Clipboard access isn't available for paste horizontal in this browser.", "error");
+        return;
+      }
+      navigator.clipboard.readText()
+        .then((text) => this.pasteHorizontal(text))
+        .catch(() => {
+          this.showLabelStatus("Couldn't read the clipboard. Try Ctrl+V, or allow clipboard access.", "error");
+        });
+    }
+
+    pasteHorizontal(text) {
+      if (!this.selectedCell || text === undefined || text === null) return;
+      const normalized = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const lines = normalized.split("\n");
+      while (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+      const values = lines.flatMap((line) => line.split("\t").map((value) => value.replace(/[\r\n]+/g, " ")));
+      if (!values.length) return;
+
+      const rows = this.labelRows.filter((row) => row.image_id === this.selectedId);
+      const rowIndex = rows.findIndex((row) => row.row_id === this.selectedCell.rowId);
+      const startColumn = this.selectedCell.col;
+      if (rowIndex < 0) return;
+      const row = rows[rowIndex];
+
+      if (startColumn + values.length > row.cells.length) {
+        this.showLabelStatus(
+          `Paste horizontal needs ${values.length} lanes, but only ${row.cells.length - startColumn} remain.`,
+          "error",
+        );
+        this.focusSelectedCell();
+        return;
+      }
+      for (let index = 0; index < values.length; index += 1) {
+        const cell = row.cells[startColumn + index];
+        if (cell.merged_into !== null || cell.colspan !== 1) {
+          this.showLabelStatus("Unmerge the destination cells before pasting horizontally.", "error");
+          this.focusSelectedCell();
+          return;
+        }
+      }
+
+      const before = this.beginLabelHistory();
+      values.forEach((value, index) => { row.cells[startColumn + index].text = value; });
+      this.selectionAnchor = { rowId: row.row_id, col: startColumn };
+      this.selectedCell = { rowId: row.row_id, col: startColumn + values.length - 1 };
+      this.renderLabelRows();
+      this.draw();
+      this.updateProperties();
+      this.focusSelectedCell();
+      this.commitLabelHistory(before);
+      this.showLabelStatus(
+        `Pasted ${values.length} value${values.length === 1 ? "" : "s"} across the row.`,
         "success",
       );
     }
@@ -1947,13 +2076,14 @@
         this.showLabelStatus("Unmerge this row before filling lane numbers.", "error");
         return;
       }
+      const before = this.beginLabelHistory();
       row.cells.forEach((cell, column) => { cell.text = String(column + 1); });
       this.selectionAnchor = { rowId: row.row_id, col: 0 };
       this.selectedCell = { rowId: row.row_id, col: row.cells.length - 1 };
       this.renderLabelRows();
       this.updateProperties();
       this.focusSelectedCell();
-      this.syncState();
+      this.commitLabelHistory(before);
       this.showLabelStatus(`Filled lane numbers 1–${row.cells.length}.`, "success");
     }
 
@@ -1973,13 +2103,14 @@
         this.showLabelStatus("Enter at least one pattern value before repeating it.", "error");
         return;
       }
+      const before = this.beginLabelHistory();
       row.cells.forEach((cell, column) => { cell.text = pattern[column % pattern.length]; });
       this.selectionAnchor = { rowId: row.row_id, col: 0 };
       this.selectedCell = { rowId: row.row_id, col: row.cells.length - 1 };
       this.renderLabelRows();
       this.updateProperties();
       this.focusSelectedCell();
-      this.syncState();
+      this.commitLabelHistory(before);
       this.showLabelStatus(`Repeated a ${pattern.length}-cell pattern across ${row.cells.length} lanes.`, "success");
     }
 
@@ -2024,11 +2155,12 @@
       if (!resolved) return;
       rowId = resolved.row.row_id;
       column = resolved.column;
+      const historyBefore = this.beginLabelHistory();
       this.selectCell(rowId, column, false);
       const cell = this.cellElement(rowId, column);
       const row = resolved.row;
       if (!cell || !row) return;
-      this.editingCell = { rowId, col: column, original: row.cells[column].text };
+      this.editingCell = { rowId, col: column, original: row.cells[column].text, historyBefore };
       if (initialText !== null) {
         row.cells[column].text = initialText;
         cell.textContent = initialText;
@@ -2042,7 +2174,7 @@
 
     finishEditing(commit) {
       if (!this.editingCell) return;
-      const { rowId, col, original } = this.editingCell;
+      const { rowId, col, original, historyBefore } = this.editingCell;
       const row = this.labelRows.find((candidate) => candidate.row_id === rowId);
       const cell = this.cellElement(rowId, col);
       if (row?.cells[col] && cell) {
@@ -2052,7 +2184,7 @@
       }
       this.editingCell = null;
       this.updateCellSelection();
-      if (commit) this.syncState();
+      if (commit && historyBefore) this.commitLabelHistory(historyBefore);
     }
 
     moveCellSelection(horizontal, vertical, extend = false) {
@@ -2174,12 +2306,13 @@
     clearSelectedCells() {
       const entries = this.selectedCellEntries();
       if (!entries.length) return;
+      const before = this.beginLabelHistory();
       for (const { cell } of entries) {
         if (cell.merged_into === null) cell.text = "";
       }
       this.renderLabelRows();
       this.focusSelectedCell();
-      this.syncState();
+      this.commitLabelHistory(before);
     }
 
     clearMergesForImage(imageId) {
@@ -2422,9 +2555,9 @@
       };
     }
 
-    syncState(preserveDeleteHistory = false) {
+    syncState(preserveHistory = true) {
       if (this.isLoadingProject) return;
-      if (!preserveDeleteHistory && !this.isApplyingHistory) {
+      if (!preserveHistory && !this.isApplyingHistory) {
         this.undoStack = [];
         this.redoStack = [];
         this.updateHistoryControls();

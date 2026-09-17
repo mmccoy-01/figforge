@@ -602,7 +602,9 @@ def _productivity_controls():
         ),
         ui.tags.p(
             "Copy cells from Excel or Google Sheets, select a starting cell, then paste. "
-            "New rows are added when multiline data needs them.",
+            "New rows are added when multiline data needs them. Press Ctrl/Cmd+Shift+V to "
+            "paste horizontal: every copied value, even from multiple rows, is flattened "
+            "into a single run across the lanes.",
             class_="lane-guide-help",
         ),
         ui.tags.div(

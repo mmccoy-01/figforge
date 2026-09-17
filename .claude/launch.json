@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "figforge",
+      "runtimeExecutable": ".venv/Scripts/shiny.exe",
+      "runtimeArgs": ["run", "--reload", "app.py"],
+      "port": 8000
+    }
+  ]
+}

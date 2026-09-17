@@ -2,6 +2,23 @@
 
 All notable changes to FigForge are documented here.
 
+## Unreleased
+
+### Added
+
+- Paste horizontal (Ctrl/Cmd+Shift+V): flattens copied values, even from
+  multiple rows or columns, into a single left-to-right run starting at the
+  selected lane.
+
+### Fixed
+
+- Undo/redo now cover label-grid edits — typing, tabular paste, paste
+  horizontal, clear, fill lane numbers, repeat pattern, and add/delete row —
+  not just image deletion. Routine actions (moving images, adjusting lane
+  guides, and so on) no longer silently clear the undo history.
+- Deleting a label row now removes every row in a multi-row selection instead
+  of only the most recently focused row.
+
 ## 0.14.0-beta.1 — 2026-09-02
 
 ### Added

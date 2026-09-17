@@ -21,10 +21,12 @@ grid. It is designed for figures containing up to 30 lanes.
 - Import PNG, JPEG, and TIFF source images. TIFF files retain their original data
   while using a browser-safe preview for editing.
 - Move, resize, fit, crop, reset, and delete images without changing the source
-  file. Undo and redo cover image deletion.
+  file. Undo and redo cover image deletion and label-grid edits (typing,
+  paste, clear, fill, and add/delete row).
 - Align 1–30 uniform lane guides by dragging the outer boundaries.
 - Add label rows above or below an image and paste tabular data from Excel or
-  Google Sheets.
+  Google Sheets. Paste horizontal (Ctrl/Cmd+Shift+V) flattens copied values
+  into a single row across the lanes.
 - Navigate cells with the keyboard; format, merge, and unmerge rectangular ranges
   horizontally or vertically.
 - Apply alignment, font styling, text and cell-fill colors, rotation, borders,
