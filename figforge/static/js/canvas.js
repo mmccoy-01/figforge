@@ -37,6 +37,8 @@
       this.selectionAnchor = null;
       this.editingCell = null;
       this.draggingSelection = false;
+      this.pasteHorizontalPending = false;
+      this.pasteHorizontalPendingTimeout = null;
       this.isLoadingProject = false;
       this.isApplyingHistory = false;
       this.undoStack = [];
@@ -1867,7 +1869,7 @@
         event.stopPropagation();
         this.finishEditing(true);
         this.selectCell(rowId, column, false);
-        this.pasteHorizontalFromClipboard();
+        this.armPasteHorizontal();
         return;
       }
 
@@ -1945,7 +1947,20 @@
       event.stopPropagation();
       this.finishEditing(true);
       this.selectCell(cell.dataset.rowId, Number(cell.dataset.column), false);
-      this.pasteTabularText(text);
+      if (this.pasteHorizontalPending) {
+        this.pasteHorizontalPending = false;
+        this.pasteHorizontal(text);
+      } else {
+        this.pasteTabularText(text);
+      }
+    }
+
+    armPasteHorizontal() {
+      this.pasteHorizontalPending = true;
+      window.clearTimeout(this.pasteHorizontalPendingTimeout);
+      this.pasteHorizontalPendingTimeout = window.setTimeout(() => {
+        this.pasteHorizontalPending = false;
+      }, 1000);
     }
 
     pasteTabularText(text) {
@@ -2009,18 +2024,6 @@
         `Pasted ${populated} cell${populated === 1 ? "" : "s"} across ${matrix.length} row${matrix.length === 1 ? "" : "s"}.`,
         "success",
       );
-    }
-
-    pasteHorizontalFromClipboard() {
-      if (!navigator.clipboard?.readText) {
-        this.showLabelStatus("Clipboard access isn't available for paste horizontal in this browser.", "error");
-        return;
-      }
-      navigator.clipboard.readText()
-        .then((text) => this.pasteHorizontal(text))
-        .catch(() => {
-          this.showLabelStatus("Couldn't read the clipboard. Try Ctrl+V, or allow clipboard access.", "error");
-        });
     }
 
     pasteHorizontal(text) {
