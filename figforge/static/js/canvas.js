@@ -1869,7 +1869,7 @@
         event.stopPropagation();
         this.finishEditing(true);
         this.selectCell(rowId, column, false);
-        this.armPasteHorizontal();
+        this.pasteHorizontalFromClipboard();
         return;
       }
 
@@ -1945,22 +1945,40 @@
       if (!cell || text === undefined) return;
       event.preventDefault();
       event.stopPropagation();
+      // A paste-horizontal read is already in flight for this same shortcut in
+      // browsers that also fire a native paste event for Ctrl/Cmd+Shift+V.
+      if (this.pasteHorizontalPending) return;
       this.finishEditing(true);
       this.selectCell(cell.dataset.rowId, Number(cell.dataset.column), false);
-      if (this.pasteHorizontalPending) {
-        this.pasteHorizontalPending = false;
-        this.pasteHorizontal(text);
-      } else {
-        this.pasteTabularText(text);
-      }
+      this.pasteTabularText(text);
     }
 
-    armPasteHorizontal() {
+    pasteHorizontalFromClipboard() {
+      if (!navigator.clipboard?.readText) {
+        this.showLabelStatus(
+          "Clipboard access isn't available for paste horizontal in this browser. Try Ctrl/Cmd+V instead.",
+          "error",
+        );
+        return;
+      }
       this.pasteHorizontalPending = true;
       window.clearTimeout(this.pasteHorizontalPendingTimeout);
       this.pasteHorizontalPendingTimeout = window.setTimeout(() => {
         this.pasteHorizontalPending = false;
-      }, 1000);
+      }, 1500);
+      navigator.clipboard.readText()
+        .then((text) => this.pasteHorizontal(text))
+        .catch(() => {
+          this.showLabelStatus(
+            "Couldn't read the clipboard. Your browser may be blocking clipboard access for "
+              + "this site — allow it and try again, or use Ctrl/Cmd+V.",
+            "error",
+          );
+        })
+        .finally(() => {
+          window.clearTimeout(this.pasteHorizontalPendingTimeout);
+          this.pasteHorizontalPending = false;
+        });
     }
 
     pasteTabularText(text) {
