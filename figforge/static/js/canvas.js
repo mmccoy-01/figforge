@@ -37,7 +37,7 @@
       this.selectionAnchor = null;
       this.editingCell = null;
       this.draggingSelection = false;
-      this.shiftKeyDown = false;
+      this.pasteHorizontalInFlight = false;
       this.isLoadingProject = false;
       this.isApplyingHistory = false;
       this.undoStack = [];
@@ -59,20 +59,6 @@
       this.canvas.addEventListener("pointermove", (event) => this.pointerMove(event));
       this.canvas.addEventListener("pointerup", (event) => this.pointerUp(event));
       this.canvas.addEventListener("pointercancel", (event) => this.pointerUp(event));
-
-      // Tracked independently of the paste event itself: ClipboardEvent carries no
-      // modifier-key state, so Ctrl+Shift+V is detected by checking this flag when a
-      // (native, reliably-firing) paste event lands rather than intercepting the
-      // shortcut and reading the clipboard out of band.
-      document.addEventListener("keydown", (event) => {
-        if (event.key === "Shift") this.shiftKeyDown = true;
-      });
-      document.addEventListener("keyup", (event) => {
-        if (event.key === "Shift") this.shiftKeyDown = false;
-      });
-      window.addEventListener("blur", () => {
-        this.shiftKeyDown = false;
-      });
 
       document.addEventListener("keydown", (event) => {
         const target = event.target;
@@ -1875,6 +1861,14 @@
       const rowId = cell.dataset.rowId;
       const column = Number(cell.dataset.column);
       const editing = cell.contentEditable === "true";
+      const commandKey = event.ctrlKey || event.metaKey;
+
+      if (commandKey && event.shiftKey && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.pasteHorizontalFromClipboard(rowId, column);
+        return;
+      }
 
       if (editing) {
         if (event.key === "Escape") {
@@ -1950,11 +1944,7 @@
       event.stopPropagation();
       this.finishEditing(true);
       this.selectCell(cell.dataset.rowId, Number(cell.dataset.column), false);
-      if (this.shiftKeyDown) {
-        this.pasteHorizontal(text);
-      } else {
-        this.pasteTabularText(text);
-      }
+      this.pasteTabularText(text);
     }
 
     pasteTabularText(text) {
@@ -2020,8 +2010,35 @@
       );
     }
 
-    pasteHorizontal(text) {
-      if (!this.selectedCell || text === undefined || text === null) return;
+    async pasteHorizontalFromClipboard(rowId, column) {
+      if (this.pasteHorizontalInFlight) return;
+      if (!navigator.clipboard?.readText) {
+        this.showLabelStatus(
+          "Clipboard access isn't available for paste horizontal in this browser. Try Ctrl/Cmd+V instead.",
+          "error",
+        );
+        return;
+      }
+      this.finishEditing(true);
+      this.selectCell(rowId, column, false);
+      this.pasteHorizontalInFlight = true;
+      try {
+        const text = await navigator.clipboard.readText();
+        this.pasteHorizontal(text, { rowId, col: column });
+      } catch (error) {
+        this.showLabelStatus(
+          `Couldn't read the clipboard for paste horizontal (${error?.name || "blocked"}). `
+            + "Allow clipboard access for this site in your browser's address-bar permissions, "
+            + "or use Ctrl/Cmd+V.",
+          "error",
+        );
+      } finally {
+        this.pasteHorizontalInFlight = false;
+      }
+    }
+
+    pasteHorizontal(text, target = this.selectedCell) {
+      if (!target || text === undefined || text === null) return;
       const normalized = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
       const lines = normalized.split("\n");
       while (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
@@ -2029,8 +2046,8 @@
       if (!values.length) return;
 
       const rows = this.labelRows.filter((row) => row.image_id === this.selectedId);
-      const rowIndex = rows.findIndex((row) => row.row_id === this.selectedCell.rowId);
-      const startColumn = this.selectedCell.col;
+      const rowIndex = rows.findIndex((row) => row.row_id === target.rowId);
+      const startColumn = target.col;
       if (rowIndex < 0) return;
       const row = rows[rowIndex];
 
