@@ -2019,15 +2019,23 @@
         );
         return;
       }
-      this.finishEditing(true);
-      this.selectCell(rowId, column, false);
       this.pasteHorizontalInFlight = true;
       try {
         const text = await navigator.clipboard.readText();
+        if (!text) {
+          this.showLabelStatus(
+            "Clipboard read returned nothing to paste — your browser may be silently blocking "
+              + "clipboard access for this site. Copy the values again, or use Ctrl/Cmd+V.",
+            "error",
+          );
+          return;
+        }
+        this.finishEditing(true);
+        this.selectCell(rowId, column, false);
         this.pasteHorizontal(text, { rowId, col: column });
       } catch (error) {
         this.showLabelStatus(
-          `Couldn't read the clipboard for paste horizontal (${error?.name || "blocked"}). `
+          `Couldn't read the clipboard for paste horizontal (${error?.name || error?.message || "blocked"}). `
             + "Allow clipboard access for this site in your browser's address-bar permissions, "
             + "or use Ctrl/Cmd+V.",
           "error",
