@@ -37,8 +37,7 @@
       this.selectionAnchor = null;
       this.editingCell = null;
       this.draggingSelection = false;
-      this.pasteHorizontalPending = false;
-      this.pasteHorizontalPendingTimeout = null;
+      this.shiftKeyDown = false;
       this.isLoadingProject = false;
       this.isApplyingHistory = false;
       this.undoStack = [];
@@ -60,6 +59,20 @@
       this.canvas.addEventListener("pointermove", (event) => this.pointerMove(event));
       this.canvas.addEventListener("pointerup", (event) => this.pointerUp(event));
       this.canvas.addEventListener("pointercancel", (event) => this.pointerUp(event));
+
+      // Tracked independently of the paste event itself: ClipboardEvent carries no
+      // modifier-key state, so Ctrl+Shift+V is detected by checking this flag when a
+      // (native, reliably-firing) paste event lands rather than intercepting the
+      // shortcut and reading the clipboard out of band.
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Shift") this.shiftKeyDown = true;
+      });
+      document.addEventListener("keyup", (event) => {
+        if (event.key === "Shift") this.shiftKeyDown = false;
+      });
+      window.addEventListener("blur", () => {
+        this.shiftKeyDown = false;
+      });
 
       document.addEventListener("keydown", (event) => {
         const target = event.target;
@@ -1862,16 +1875,6 @@
       const rowId = cell.dataset.rowId;
       const column = Number(cell.dataset.column);
       const editing = cell.contentEditable === "true";
-      const commandKey = event.ctrlKey || event.metaKey;
-
-      if (commandKey && event.shiftKey && event.key.toLowerCase() === "v") {
-        event.preventDefault();
-        event.stopPropagation();
-        this.finishEditing(true);
-        this.selectCell(rowId, column, false);
-        this.pasteHorizontalFromClipboard();
-        return;
-      }
 
       if (editing) {
         if (event.key === "Escape") {
@@ -1945,40 +1948,13 @@
       if (!cell || text === undefined) return;
       event.preventDefault();
       event.stopPropagation();
-      // A paste-horizontal read is already in flight for this same shortcut in
-      // browsers that also fire a native paste event for Ctrl/Cmd+Shift+V.
-      if (this.pasteHorizontalPending) return;
       this.finishEditing(true);
       this.selectCell(cell.dataset.rowId, Number(cell.dataset.column), false);
-      this.pasteTabularText(text);
-    }
-
-    pasteHorizontalFromClipboard() {
-      if (!navigator.clipboard?.readText) {
-        this.showLabelStatus(
-          "Clipboard access isn't available for paste horizontal in this browser. Try Ctrl/Cmd+V instead.",
-          "error",
-        );
-        return;
+      if (this.shiftKeyDown) {
+        this.pasteHorizontal(text);
+      } else {
+        this.pasteTabularText(text);
       }
-      this.pasteHorizontalPending = true;
-      window.clearTimeout(this.pasteHorizontalPendingTimeout);
-      this.pasteHorizontalPendingTimeout = window.setTimeout(() => {
-        this.pasteHorizontalPending = false;
-      }, 1500);
-      navigator.clipboard.readText()
-        .then((text) => this.pasteHorizontal(text))
-        .catch(() => {
-          this.showLabelStatus(
-            "Couldn't read the clipboard. Your browser may be blocking clipboard access for "
-              + "this site — allow it and try again, or use Ctrl/Cmd+V.",
-            "error",
-          );
-        })
-        .finally(() => {
-          window.clearTimeout(this.pasteHorizontalPendingTimeout);
-          this.pasteHorizontalPending = false;
-        });
     }
 
     pasteTabularText(text) {
