@@ -13,6 +13,14 @@
   const ACTIVE_DRAFT_KEY = "active";
   const SAVE_DELAY_MS = 350;
 
+  function requiredAssetIds(state) {
+    const ids = (state?.images || []).flatMap((image) => [
+      image.asset_id,
+      ...(image.stitched_segments || []).map((segment) => segment.asset_id),
+    ]);
+    return [...new Set(ids)];
+  }
+
   class BrowserRecovery {
     constructor() {
       this.assets = new Map();
@@ -89,7 +97,7 @@
       this.pendingDraft = null;
       try {
         await this.withStore("drafts", "readwrite", (store) => store.put(draft, ACTIVE_DRAFT_KEY));
-        const requiredIds = (draft.state.images || []).map((image) => image.asset_id);
+        const requiredIds = requiredAssetIds(draft.state);
         const sourcesReady = requiredIds.every((assetId) => this.cachedAssetIds.has(assetId));
         this.setStatus(
           sourcesReady ? "Browser recovery saved" : "Caching source images…",
@@ -187,7 +195,7 @@
       if (this.restoring) return;
       const draft = this.restoreDraft || await this.getDraft().catch(() => null);
       if (!draft?.state) return;
-      const requiredIds = [...new Set((draft.state.images || []).map((image) => image.asset_id))];
+      const requiredIds = requiredAssetIds(draft.state);
       for (const assetId of requiredIds) {
         const cached = await this.withStore("assets", "readonly", (store) => store.get(assetId)).catch(() => null);
         if (!cached?.blob) {

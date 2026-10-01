@@ -232,3 +232,54 @@ def test_export_rejects_unsupported_dpi(tmp_path: Path) -> None:
 
     with pytest.raises(FigureExportError, match="300 or 600"):
         render_figure(state, (asset,), store, dpi=1200)
+
+
+def test_stitched_image_renders_each_exposure_with_a_seam(tmp_path: Path) -> None:
+    store, asset, state = export_fixture(tmp_path)
+    long_source = tmp_path / "gel-long.png"
+    Image.new("RGB", (40, 20), color=(20, 30, 210)).save(long_source, format="PNG")
+    long_asset = store.import_upload(long_source, original_filename="gel-long.png")
+    payload = deepcopy(state.to_dict())
+    image = payload["images"][0]
+    image["crop"] = {"x": 0, "y": 0, "width": 20, "height": 20}
+    image["stitched_segments"] = [
+        {
+            "asset_id": long_asset.asset_id,
+            "filename": long_asset.filename,
+            "source_url": long_asset.source_url,
+            "display_url": long_asset.url,
+            "original_width": 40,
+            "original_height": 20,
+            "crop": {"x": 20, "y": 0, "width": 20, "height": 20},
+        }
+    ]
+    image["seam_line"] = "white"
+    payload["label_rows"] = []
+    stitched = CanvasState.from_mapping(payload)
+
+    figure = render_figure(stitched, (asset, long_asset), store, dpi=300)
+    scale = 300 / 96
+
+    middle_y = round(30 * scale)
+    assert figure.getpixel((round(15 * scale), middle_y)) == (205, 20, 25)
+    assert figure.getpixel((round(45 * scale), middle_y)) == (20, 30, 210)
+    assert figure.getpixel((round(30 * scale), middle_y)) == (255, 255, 255)
+
+
+def test_stitched_export_requires_every_source_asset(tmp_path: Path) -> None:
+    store, asset, state = export_fixture(tmp_path)
+    payload = deepcopy(state.to_dict())
+    payload["images"][0]["stitched_segments"] = [
+        {
+            "asset_id": "missing",
+            "filename": "gone.png",
+            "source_url": "/assets/gone.png",
+            "display_url": "/assets/gone.png",
+            "original_width": 40,
+            "original_height": 20,
+            "crop": {"x": 0, "y": 0, "width": 40, "height": 20},
+        }
+    ]
+
+    with pytest.raises(FigureExportError, match="gone.png"):
+        render_figure(CanvasState.from_mapping(payload), (asset,), store, dpi=300)

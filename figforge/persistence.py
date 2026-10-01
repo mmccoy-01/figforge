@@ -509,13 +509,11 @@ def import_project_bundle(
 
             state_mapping = original_state.to_dict()
             for image in state_mapping["images"]:
-                record = remapped.get(image["asset_id"])
-                if record is None:
-                    raise ProjectBundleError("Project state references a missing source asset")
-                image["asset_id"] = record.asset_id
-                image["filename"] = record.filename
-                image["source_url"] = record.source_url
-                image["display_url"] = record.url
+                _remap_image_assets(
+                    image,
+                    remapped,
+                    "Project state references a missing source asset",
+                )
             return (
                 str(manifest.get("name", "Untitled figure")).strip() or "Untitled figure",
                 CanvasState.from_mapping(state_mapping),
@@ -537,14 +535,29 @@ def remap_canvas_assets(
 
     state_mapping = state.to_dict()
     for image in state_mapping["images"]:
-        record = assets_by_old_id.get(str(image["asset_id"]))
-        if record is None:
-            raise ProjectBundleError("Browser recovery is missing a source image")
-        image["asset_id"] = record.asset_id
-        image["filename"] = record.filename
-        image["source_url"] = record.source_url
-        image["display_url"] = record.url
+        _remap_image_assets(
+            image,
+            assets_by_old_id,
+            "Browser recovery is missing a source image",
+        )
     return CanvasState.from_mapping(state_mapping)
+
+
+def _remap_image_assets(
+    image: dict[str, Any],
+    assets_by_old_id: Mapping[str, AssetRecord],
+    missing_message: str,
+) -> None:
+    """Point an image and its stitched segments at newly imported asset records."""
+
+    for part in (image, *image.get("stitched_segments", ())):
+        record = assets_by_old_id.get(str(part["asset_id"]))
+        if record is None:
+            raise ProjectBundleError(missing_message)
+        part["asset_id"] = record.asset_id
+        part["filename"] = record.filename
+        part["source_url"] = record.source_url
+        part["display_url"] = record.url
 
 
 def new_project_id() -> str:

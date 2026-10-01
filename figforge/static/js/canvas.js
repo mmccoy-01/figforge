@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  const SCHEMA_VERSION = 9;
+  const SCHEMA_VERSION = 10;
   const MAX_LANES = 30;
   const DEFAULT_LANE_OPACITY = 0.35;
   const DEFAULT_GRID_LEFT = 0.05;
@@ -20,6 +20,8 @@
   const MIN_IMAGE_SIZE = 36;
   const MIN_CROP_SIZE = 20;
   const SELECTION_COLOR = "#087f72";
+  const MAX_STITCH_PARTS = 6;
+  const SEAM_COLORS = { black: "#000000", white: "#ffffff" };
 
   class FigureCanvas {
     constructor(canvas, container) {
@@ -30,6 +32,8 @@
       this.images = [];
       this.templateFrame = null;
       this.imageElements = new Map();
+      this.assetElements = new Map();
+      this.stitchPickId = null;
       this.laneGrids = new Map();
       this.labelRows = [];
       this.selectedId = null;
@@ -66,6 +70,11 @@
           || target instanceof HTMLTextAreaElement
           || target?.isContentEditable;
         const commandKey = event.ctrlKey || event.metaKey;
+        if (event.key === "Escape" && this.stitchPickId && !editingText) {
+          event.preventDefault();
+          this.cancelStitchPick("Stitch cancelled.");
+          return;
+        }
         if (event.key === "Escape" && this.cropMode && !editingText) {
           event.preventDefault();
           this.finishCrop(false);
@@ -111,6 +120,12 @@
       document.getElementById("fit_image")?.addEventListener("click", () => this.fitSelected());
       document.getElementById("crop_tool")?.addEventListener("click", () => this.toggleCropMode());
       document.getElementById("reset_crop")?.addEventListener("click", () => this.resetCrop());
+      document.getElementById("stitch_images")?.addEventListener("click", () => this.toggleStitchPick());
+      document.getElementById("unstitch_image")?.addEventListener("click", () => this.unstitchSelected());
+      document.getElementById("stitch_seam")?.addEventListener(
+        "change",
+        (event) => this.updateSeamLine(event.target.value),
+      );
       document.getElementById("start_blank_template")?.addEventListener(
         "click",
         () => this.startBlankTemplate(),
@@ -223,7 +238,7 @@
 
     addAsset(asset) {
       window.FigForgeRecovery?.captureAsset(asset);
-      const existing = this.images.find((image) => image.asset_id === asset.asset_id);
+      const existing = this.images.find((image) => this.imageAssetIds(image).includes(asset.asset_id));
       if (existing) {
         this.select(existing.image_id);
         return;
@@ -265,6 +280,8 @@
             height: asset.height,
           },
           rotation: 0,
+          stitched_segments: [],
+          seam_line: "black",
         };
         if (template) {
           const grid = this.laneGrids.get(template.image_id);
@@ -279,6 +296,7 @@
           this.templateFrame = null;
         }
         this.imageElements.set(imageId, imageElement);
+        this.assetElements.set(asset.asset_id, imageElement);
         this.images.push(image);
         this.select(imageId);
         this.syncState();
@@ -322,11 +340,18 @@
             width: image.original_width,
             height: image.original_height,
           },
+        stitched_segments: (image.stitched_segments || []).map((segment) => ({
+          ...segment,
+          crop: { ...segment.crop },
+        })),
+        seam_line: image.seam_line || "black",
       }));
       this.templateFrame = payload.state?.template_frame
         ? { ...payload.state.template_frame, is_template: true }
         : null;
       this.imageElements.clear();
+      this.assetElements.clear();
+      this.stitchPickId = null;
       this.laneGrids = new Map(
         (payload.state?.lane_grids || []).map((grid) => [
           grid.image_id,
@@ -362,6 +387,7 @@
           element.decoding = "async";
           element.onload = () => {
             this.imageElements.set(image.image_id, element);
+            this.assetElements.set(image.asset_id, element);
             resolve();
           };
           element.onerror = () => {
@@ -371,6 +397,11 @@
           element.src = image.display_url;
         })),
       );
+      for (const image of this.images) {
+        for (const segment of image.stitched_segments) {
+          this.elementForAsset(segment.asset_id, segment.display_url);
+        }
+      }
 
       const name = document.getElementById("figure_name");
       if (name) name.value = payload.name || "Untitled figure";
@@ -404,8 +435,8 @@
         this.syncState();
         return;
       }
-      const crop = this.imageCrop(image);
-      const size = this.fittedSize(crop.width, crop.height, 0.86, 0.82);
+      const natural = this.naturalSize(image);
+      const size = this.fittedSize(natural.width, natural.height, 0.86, 0.82);
       image.width = size.width;
       image.height = size.height;
       image.x = Math.round((this.stageWidth - size.width) / 2);
@@ -439,7 +470,8 @@
         return;
       }
       const image = this.selectedImage();
-      if (!image || image.is_template) return;
+      if (!image || image.is_template || this.isStitched(image)) return;
+      this.cancelStitchPick();
       this.cropMode = true;
       const grid = this.laneGrids.get(image.image_id);
       this.cropSessionStart = {
@@ -488,7 +520,7 @@
 
     resetCrop() {
       const image = this.selectedImage();
-      if (!image || image.is_template || !this.isCropped(image)) return;
+      if (!image || image.is_template || this.isStitched(image) || !this.isCropped(image)) return;
       const crop = this.imageCrop(image);
       const scaleX = image.width / crop.width;
       const scaleY = image.height / crop.height;
@@ -511,7 +543,8 @@
       const image = this.selectedImage();
       const cropButton = document.getElementById("crop_tool");
       if (cropButton) {
-        cropButton.disabled = !this.cropMode && (!image || image.is_template);
+        cropButton.disabled = !this.cropMode
+          && (!image || image.is_template || this.isStitched(image));
       }
       cropButton?.classList.toggle("tool-button--active", this.cropMode);
       if (cropButton) {
@@ -519,11 +552,13 @@
         if (label) label.textContent = this.cropMode ? "Done" : "Crop";
         cropButton.title = this.cropMode
           ? "Apply crop (Escape cancels)"
-          : "Crop the selected image non-destructively";
+          : this.isStitched(image)
+            ? "Unstitch to change the crop of each source image"
+            : "Crop the selected image non-destructively";
       }
       document.getElementById("reset_crop")?.toggleAttribute(
         "disabled",
-        !this.isCropped(image),
+        this.isStitched(image) || !this.isCropped(image),
       );
     }
 
@@ -621,6 +656,8 @@
       } else if (command.type === "label-edit") {
         this.restoreLabelState(command.before);
         this.focusSelectedCell();
+      } else if (command.type === "image-structure") {
+        this.restoreStructure(command.before);
       }
       this.redoStack.push(command);
       this.renderLabelRows();
@@ -643,6 +680,12 @@
         this.renderLabelRows();
         this.updateCellSelection();
         this.focusSelectedCell();
+        this.draw();
+        this.updateProperties();
+      } else if (command.type === "image-structure") {
+        this.restoreStructure(command.after);
+        this.renderLabelRows();
+        this.updateCellSelection();
         this.draw();
         this.updateProperties();
       }
@@ -820,6 +863,12 @@
 
     pointerDown(event) {
       const point = this.pointerPosition(event);
+      if (this.stitchPickId) {
+        event.preventDefault();
+        this.completeStitchPick(this.hitImage(point));
+        this.updateCursor(point);
+        return;
+      }
       const selected = this.selectedImage();
       const grid = this.selectedGrid();
       const gridBoundary = selected && grid ? this.laneBoundaryAt(point, selected, grid) : null;
@@ -1076,6 +1125,13 @@
 
     updateCursor(point) {
       const selected = this.selectedImage();
+      if (this.stitchPickId) {
+        const hit = this.hitImage(point);
+        this.canvas.style.cursor = hit && !hit.is_template && hit.image_id !== this.stitchPickId
+          ? "copy"
+          : "not-allowed";
+        return;
+      }
       if (this.cropMode && selected && !selected.is_template) {
         const cropHandle = this.cropHandleAt(point, selected);
         if (!cropHandle) {
@@ -1119,8 +1175,7 @@
         }
       }
       for (const image of this.images) {
-        const element = this.imageElements.get(image.image_id);
-        if (element) this.drawCroppedImage(element, image);
+        this.drawImageParts(image);
         const grid = this.laneGrids.get(image.image_id);
         if (grid?.visible) this.drawLaneGrid(image, grid, image.image_id === this.selectedId);
       }
@@ -1133,21 +1188,355 @@
       this.positionLabelRows();
     }
 
-    drawCroppedImage(element, image) {
-      const crop = this.imageCrop(image);
-      const scaleX = element.naturalWidth / image.original_width;
-      const scaleY = element.naturalHeight / image.original_height;
+    drawImageParts(image) {
+      const layout = this.stitchLayout(image);
+      for (const { part, x, width } of layout) {
+        const element = part === image
+          ? this.imageElements.get(image.image_id)
+            || this.elementForAsset(image.asset_id, image.display_url)
+          : this.elementForAsset(part.asset_id, part.display_url);
+        if (element) {
+          this.drawCroppedImage(element, part, { x, y: image.y, width, height: image.height });
+        }
+      }
+      const seamColor = SEAM_COLORS[image.seam_line];
+      if (layout.length < 2 || !seamColor) return;
+      this.context.save();
+      this.context.fillStyle = seamColor;
+      for (const { x, width } of layout.slice(0, -1)) {
+        this.context.fillRect(Math.round(x + width) - 0.5, image.y, 1, image.height);
+      }
+      this.context.restore();
+    }
+
+    drawCroppedImage(element, source, box) {
+      const crop = this.imageCrop(source);
+      const scaleX = element.naturalWidth / source.original_width;
+      const scaleY = element.naturalHeight / source.original_height;
       this.context.drawImage(
         element,
         crop.x * scaleX,
         crop.y * scaleY,
         crop.width * scaleX,
         crop.height * scaleY,
-        image.x,
-        image.y,
-        image.width,
-        image.height,
+        box.x,
+        box.y,
+        box.width,
+        box.height,
       );
+    }
+
+    elementForAsset(assetId, url) {
+      const cached = this.assetElements.get(assetId);
+      if (cached) return cached.complete && cached.naturalWidth ? cached : null;
+      const element = new Image();
+      element.decoding = "async";
+      element.onload = () => this.draw();
+      element.onerror = () => this.showCanvasError("Could not display a stitched source image");
+      element.src = url;
+      this.assetElements.set(assetId, element);
+      return null;
+    }
+
+    isStitched(image) {
+      return Boolean(image && !image.is_template && image.stitched_segments?.length);
+    }
+
+    imageAssetIds(image) {
+      return [image.asset_id, ...(image.stitched_segments || []).map((segment) => segment.asset_id)];
+    }
+
+    imageParts(image) {
+      return [image, ...(image.stitched_segments || [])];
+    }
+
+    // Mirrors ImageTransform.stitch_layout in figforge/models.py: every part shares
+    // the image height and keeps its crop aspect ratio relative to the others.
+    stitchLayout(image) {
+      const parts = this.imageParts(image);
+      const naturalWidths = parts.map((part) => {
+        const crop = this.imageCrop(part);
+        return crop.width / crop.height;
+      });
+      const total = naturalWidths.reduce((sum, width) => sum + width, 0);
+      let offset = 0;
+      return parts.map((part, index) => {
+        const left = image.x + image.width * offset / total;
+        offset += naturalWidths[index];
+        const right = image.x + image.width * offset / total;
+        return { part, x: left, width: right - left };
+      });
+    }
+
+    naturalSize(image) {
+      const crop = this.imageCrop(image);
+      const ratio = this.imageParts(image).reduce((sum, part) => {
+        const partCrop = this.imageCrop(part);
+        return sum + partCrop.width / partCrop.height;
+      }, 0);
+      return { width: crop.height * ratio, height: crop.height };
+    }
+
+    segmentFrom(part) {
+      return {
+        asset_id: part.asset_id,
+        filename: part.filename,
+        source_url: part.source_url,
+        display_url: part.display_url,
+        original_width: part.original_width,
+        original_height: part.original_height,
+        crop: { ...this.imageCrop(part) },
+      };
+    }
+
+    snapshotStructure() {
+      return {
+        images: this.images.map((image) => ({
+          ...image,
+          crop: { ...this.imageCrop(image) },
+          stitched_segments: (image.stitched_segments || []).map((segment) => ({
+            ...segment,
+            crop: { ...segment.crop },
+          })),
+        })),
+        grids: Array.from(this.laneGrids.values(), (grid) => ({
+          ...grid,
+          boundaries: [...grid.boundaries],
+        })),
+        ...this.snapshotLabelState(),
+      };
+    }
+
+    restoreStructure(snapshot) {
+      this.images = snapshot.images.map((image) => ({
+        ...image,
+        crop: { ...image.crop },
+        stitched_segments: image.stitched_segments.map((segment) => ({
+          ...segment,
+          crop: { ...segment.crop },
+        })),
+      }));
+      this.laneGrids = new Map(
+        snapshot.grids.map((grid) => [grid.image_id, { ...grid, boundaries: [...grid.boundaries] }]),
+      );
+      this.restoreLabelState(snapshot);
+      for (const image of this.images) {
+        if (this.imageElements.has(image.image_id)) continue;
+        const element = this.assetElements.get(image.asset_id);
+        if (element) this.imageElements.set(image.image_id, element);
+      }
+      this.editingCell = null;
+    }
+
+    recordStructureChange(before) {
+      this.undoStack.push({ type: "image-structure", before, after: this.snapshotStructure() });
+      this.redoStack = [];
+      this.updateHistoryControls();
+    }
+
+    toggleStitchPick() {
+      if (this.stitchPickId) {
+        this.cancelStitchPick("Stitch cancelled.");
+        return;
+      }
+      const image = this.selectedImage();
+      if (!image || image.is_template) return;
+      if (this.cropMode) this.finishCrop(true);
+      if (this.images.length < 2) {
+        this.setStitchStatus("Add a second image to the canvas first.", "error");
+        return;
+      }
+      this.stitchPickId = image.image_id;
+      this.setStitchStatus("Click the image to join with this one. Escape cancels.");
+      this.updateStitchControls(image);
+    }
+
+    cancelStitchPick(message = "") {
+      if (!this.stitchPickId) return;
+      this.stitchPickId = null;
+      this.setStitchStatus(message);
+      this.updateStitchControls(this.selectedImage());
+    }
+
+    completeStitchPick(target) {
+      const source = this.images.find((image) => image.image_id === this.stitchPickId);
+      this.stitchPickId = null;
+      if (!source || !target || target.is_template || target.image_id === source.image_id) {
+        this.setStitchStatus("Stitch cancelled: click a different image.", "error");
+        this.updateStitchControls(this.selectedImage());
+        return;
+      }
+      this.stitchImages(source, target);
+    }
+
+    stitchImages(first, second) {
+      // Join in on-canvas order so users can arrange the images before stitching.
+      const [left, right] = first.x + first.width / 2 <= second.x + second.width / 2
+        ? [first, second]
+        : [second, first];
+      const parts = [...this.imageParts(left), ...this.imageParts(right)];
+      if (parts.length > MAX_STITCH_PARTS) {
+        this.setStitchStatus(
+          `A stitched image can join at most ${MAX_STITCH_PARTS} source images.`,
+          "error",
+        );
+        this.updateStitchControls(this.selectedImage());
+        return;
+      }
+      this.finishEditing(true);
+      const before = this.snapshotStructure();
+      const leftCrop = this.imageCrop(left);
+      const rightCrop = this.imageCrop(right);
+      const heightMismatch = Math.abs(leftCrop.height - rightCrop.height)
+        / Math.max(leftCrop.height, rightCrop.height);
+
+      const leftWidth = left.width;
+      left.stitched_segments = parts.slice(1).map((part) => this.segmentFrom(part));
+      left.seam_line = left.seam_line || "black";
+      left.width = Math.round(left.height * parts.reduce((sum, part) => {
+        const crop = this.imageCrop(part);
+        return sum + crop.width / crop.height;
+      }, 0));
+      const total = left.width;
+      const rightWidth = total - leftWidth;
+
+      // Lane guides span the combined strip, keeping each side's outer boundary.
+      const leftGrid = this.laneGrids.get(left.image_id);
+      const rightGrid = this.laneGrids.get(right.image_id);
+      if (leftGrid || rightGrid) {
+        const grid = leftGrid || { ...rightGrid, image_id: left.image_id, boundaries: [] };
+        grid.left = (leftWidth * (leftGrid ? leftGrid.left : DEFAULT_GRID_LEFT)) / total;
+        grid.right = (leftWidth + rightWidth * (rightGrid ? rightGrid.right : DEFAULT_GRID_RIGHT)) / total;
+        grid.lane_count = leftGrid && rightGrid
+          ? Math.min(MAX_LANES, leftGrid.lane_count + rightGrid.lane_count)
+          : grid.lane_count;
+        grid.uniform = true;
+        grid.boundaries = [];
+        grid.visible = Boolean(leftGrid?.visible || rightGrid?.visible);
+        this.laneGrids.set(left.image_id, grid);
+      }
+      this.laneGrids.delete(right.image_id);
+
+      const leftHasRows = this.labelRows.some((row) => row.image_id === left.image_id);
+      const rightRows = this.labelRows.filter((row) => row.image_id === right.image_id);
+      if (leftHasRows) {
+        this.labelRows = this.labelRows.filter((row) => row.image_id !== right.image_id);
+      } else {
+        for (const row of rightRows) row.image_id = left.image_id;
+      }
+      const grid = this.laneGrids.get(left.image_id);
+      if (grid) this.resizeRowsForGrid(left.image_id, grid.lane_count);
+
+      const rightElement = this.imageElements.get(right.image_id);
+      if (rightElement) this.assetElements.set(right.asset_id, rightElement);
+      this.images = this.images.filter((image) => image.image_id !== right.image_id);
+      this.imageElements.delete(right.image_id);
+      this.selectedId = left.image_id;
+      this.selectedCell = null;
+      this.selectionAnchor = null;
+
+      this.recordStructureChange(before);
+      this.renderLabelRows();
+      this.updateCellSelection();
+      this.draw();
+      this.updateProperties();
+      this.syncState(true);
+
+      const notes = [];
+      if (leftHasRows && rightRows.length) {
+        notes.push("Label rows from the right image were removed (Undo restores them).");
+      }
+      if (heightMismatch > 0.02) {
+        notes.push(
+          "Crop heights differ, so the right side was rescaled; crop both to the same height to keep band scale matched.",
+        );
+      }
+      this.setStitchStatus(
+        ["Stitched. Lane guides now span the combined image.", ...notes].join(" "),
+        notes.length ? "error" : "success",
+      );
+    }
+
+    unstitchSelected() {
+      const image = this.selectedImage();
+      if (!this.isStitched(image)) return;
+      this.cancelStitchPick();
+      this.finishEditing(true);
+      const before = this.snapshotStructure();
+      const layout = this.stitchLayout(image);
+      const total = image.width;
+      const primary = layout[0];
+      const separated = layout.slice(1).map(({ part, x, width }) => ({
+        image_id: `image_${crypto.randomUUID()}`,
+        ...this.segmentFrom(part),
+        x: Math.round(x),
+        y: image.y,
+        width: Math.round(width),
+        height: image.height,
+        rotation: 0,
+        stitched_segments: [],
+        seam_line: "black",
+      }));
+      image.width = Math.round(primary.width);
+      image.stitched_segments = [];
+
+      const grid = this.laneGrids.get(image.image_id);
+      if (grid) {
+        const left = Math.min(1, grid.left * total / primary.width);
+        const right = Math.min(1, grid.right * total / primary.width);
+        if (right - left >= MIN_GRID_SPAN) {
+          grid.left = left;
+          grid.right = right;
+        } else {
+          grid.left = DEFAULT_GRID_LEFT;
+          grid.right = DEFAULT_GRID_RIGHT;
+        }
+      }
+
+      const index = this.images.indexOf(image);
+      this.images.splice(index + 1, 0, ...separated);
+      for (const separatedImage of separated) {
+        const element = this.assetElements.get(separatedImage.asset_id);
+        if (element) this.imageElements.set(separatedImage.image_id, element);
+      }
+
+      this.recordStructureChange(before);
+      this.draw();
+      this.updateProperties();
+      this.syncState(true);
+      this.setStitchStatus("Unstitched. Each source image can be cropped again.", "success");
+    }
+
+    updateSeamLine(value) {
+      const image = this.selectedImage();
+      if (!this.isStitched(image) || !(value in SEAM_COLORS || value === "none")) return;
+      image.seam_line = value;
+      this.draw();
+      this.syncState();
+    }
+
+    setStitchStatus(message, type = "") {
+      const status = document.getElementById("stitch_status");
+      if (!status) return;
+      status.textContent = message;
+      status.classList.toggle("is-success", type === "success");
+      status.classList.toggle("is-error", type === "error");
+    }
+
+    updateStitchControls(image) {
+      const real = image && !image.is_template ? image : null;
+      const stitchButton = document.getElementById("stitch_images");
+      if (stitchButton) {
+        stitchButton.disabled = !this.stitchPickId && (!real || this.images.length < 2);
+        stitchButton.classList.toggle("lane-action--primary", Boolean(this.stitchPickId));
+        stitchButton.textContent = this.stitchPickId ? "Cancel stitch" : "Stitch with…";
+      }
+      document.getElementById("unstitch_image")?.toggleAttribute("disabled", !this.isStitched(real));
+      const seam = document.getElementById("stitch_seam");
+      if (seam) {
+        seam.disabled = !this.isStitched(real);
+        seam.value = this.isStitched(real) ? real.seam_line : "black";
+      }
     }
 
     drawTemplateFrame(frame) {
@@ -1278,13 +1667,16 @@
 
       const label = document.getElementById("selected_object_label");
       if (label) label.textContent = image
-        ? image.is_template ? "Blank template surface" : image.filename
+        ? image.is_template
+          ? "Blank template surface"
+          : this.imageParts(image).map((part) => part.filename).join(" + ")
         : "Nothing selected";
       document.getElementById("fit_image")?.toggleAttribute("disabled", !image);
       const deleteButton = document.getElementById("delete_image");
       if (deleteButton) deleteButton.disabled = !image || Boolean(image.is_template);
       document.getElementById("add_row")?.toggleAttribute("disabled", !image);
       this.updateCropControls();
+      this.updateStitchControls(image);
       this.updateLaneControls(image);
       this.updateRowControls(image);
       this.updateFormattingControls();
@@ -1293,7 +1685,7 @@
       document.querySelectorAll("[data-figforge-asset]").forEach((button) => {
         button.classList.toggle(
           "is-active",
-          Boolean(image && !image.is_template && button.dataset.assetId === image.asset_id),
+          Boolean(image && !image.is_template && this.imageAssetIds(image).includes(button.dataset.assetId)),
         );
       });
     }
@@ -2556,6 +2948,11 @@
         images: this.images.map((image) => ({
           ...image,
           crop: { ...this.imageCrop(image) },
+          stitched_segments: (image.stitched_segments || []).map((segment) => ({
+            ...segment,
+            crop: { ...segment.crop },
+          })),
+          seam_line: image.seam_line || "black",
         })),
         template_frame: this.templateFrame
           ? {
