@@ -7,12 +7,14 @@ from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 
-SCHEMA_VERSION = 9
-LEGACY_SCHEMA_VERSIONS = {5, 6, 7, 8}
+SCHEMA_VERSION = 10
+LEGACY_SCHEMA_VERSIONS = {5, 6, 7, 8, 9}
 MAX_LANES = 30
 VALID_HORIZONTAL_ALIGNMENTS = {"left", "center", "right"}
 VALID_VERTICAL_ALIGNMENTS = {"top", "middle", "bottom"}
 VALID_ROTATIONS = {-90, 0, 90}
+VALID_SEAM_LINES = {"none", "black", "white"}
+MAX_STITCH_SEGMENTS = 5
 HEX_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -52,6 +54,39 @@ class CropState:
 
 
 @dataclass(frozen=True, slots=True)
+class StitchSegment:
+    """A cropped region of another immutable asset joined to an image's right edge."""
+
+    asset_id: str
+    filename: str
+    source_url: str
+    display_url: str
+    original_width: int
+    original_height: int
+    crop: CropState
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> StitchSegment:
+        original_width = int(value["original_width"])
+        original_height = int(value["original_height"])
+        if original_width <= 0 or original_height <= 0:
+            raise ValueError("Original image dimensions must be positive")
+        return cls(
+            asset_id=str(value["asset_id"]),
+            filename=str(value["filename"]),
+            source_url=str(value["source_url"]),
+            display_url=str(value["display_url"]),
+            original_width=original_width,
+            original_height=original_height,
+            crop=CropState.from_mapping(
+                value.get("crop"),
+                original_width=original_width,
+                original_height=original_height,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ImageTransform:
     """Non-destructive placement of one immutable image asset."""
 
@@ -68,6 +103,8 @@ class ImageTransform:
     height: float
     crop: CropState
     rotation: float = 0
+    stitched_segments: tuple[StitchSegment, ...] = ()
+    seam_line: str = "black"
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> ImageTransform:
@@ -91,12 +128,61 @@ class ImageTransform:
                 original_height=original_height,
             ),
             rotation=float(value.get("rotation", 0)),
+            stitched_segments=tuple(
+                StitchSegment.from_mapping(item)
+                for item in value.get("stitched_segments", ()) or ()
+            ),
+            seam_line=str(value.get("seam_line", "black")),
         )
+        if len(image.stitched_segments) > MAX_STITCH_SEGMENTS:
+            raise ValueError(
+                f"A stitched image can join at most {MAX_STITCH_SEGMENTS + 1} source images"
+            )
+        if image.seam_line not in VALID_SEAM_LINES:
+            raise ValueError("Seam line must be none, black, or white")
         if image.original_width <= 0 or image.original_height <= 0:
             raise ValueError("Original image dimensions must be positive")
         if image.width <= 0 or image.height <= 0:
             raise ValueError("Displayed image dimensions must be positive")
         return image
+
+    @property
+    def asset_ids(self) -> tuple[str, ...]:
+        """Every immutable asset this image renders, primary first."""
+
+        return (self.asset_id, *(segment.asset_id for segment in self.stitched_segments))
+
+    def stitch_layout(self) -> tuple[tuple[str, str, int, int, CropState, float, float], ...]:
+        """Return each part's source and canvas-space box, left to right.
+
+        Parts share the image height. Each part keeps its crop aspect ratio relative to
+        the primary crop height, and the whole strip is then stretched to the image box.
+        """
+
+        parts = [
+            (self.asset_id, self.filename, self.original_width, self.original_height, self.crop),
+            *(
+                (
+                    segment.asset_id,
+                    segment.filename,
+                    segment.original_width,
+                    segment.original_height,
+                    segment.crop,
+                )
+                for segment in self.stitched_segments
+            ),
+        ]
+        reference_height = self.crop.height
+        natural_widths = [crop.width * reference_height / crop.height for *_, crop in parts]
+        total = sum(natural_widths)
+        layout = []
+        offset = 0.0
+        for part, natural_width in zip(parts, natural_widths):
+            left = self.x + self.width * offset / total
+            offset += natural_width
+            right = self.x + self.width * offset / total
+            layout.append((*part, left, right - left))
+        return tuple(layout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,7 +498,12 @@ class CanvasState:
         return {
             "schema_version": self.schema_version,
             "canvas": {"width": self.width, "height": self.height},
-            "images": [asdict(image) for image in self.images],
+            "images": [
+                {**asdict(image), "stitched_segments": [
+                    asdict(segment) for segment in image.stitched_segments
+                ]}
+                for image in self.images
+            ],
             "template_frame": (
                 asdict(self.template_frame) if self.template_frame is not None else None
             ),

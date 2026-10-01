@@ -245,3 +245,55 @@ def test_revision_history_is_immutable_and_restore_creates_new_head(
     assert project_store.load_revision(
         project_id, version_two.revision_id
     ).state.label_rows[0].cells[0].text == "Mutant"
+
+
+def stitched_canvas_state(primary: AssetRecord, segment: AssetRecord) -> CanvasState:
+    payload = canvas_state(primary).to_dict()
+    payload["images"][0]["stitched_segments"] = [
+        {
+            "asset_id": segment.asset_id,
+            "filename": segment.filename,
+            "source_url": segment.source_url,
+            "display_url": segment.url,
+            "original_width": segment.width,
+            "original_height": segment.height,
+            "crop": {"x": 0, "y": 0, "width": segment.width, "height": segment.height},
+        }
+    ]
+    return CanvasState.from_mapping(payload)
+
+
+def test_bundle_reopens_stitched_image_with_every_source_remapped(tmp_path: Path) -> None:
+    source_store, short_asset, _ = imported_png(tmp_path, "source-assets")
+    long_source = tmp_path / "long.png"
+    Image.new("RGB", (40, 20), color=(200, 210, 220)).save(long_source, format="PNG")
+    long_asset = source_store.import_upload(long_source, original_filename="long.png")
+    bundle = tmp_path / "stitched.figforge"
+
+    create_project_bundle(
+        "Stitched",
+        stitched_canvas_state(short_asset, long_asset),
+        (short_asset, long_asset),
+        source_store,
+        bundle,
+    )
+    _, reopened_state, reopened_assets = import_project_bundle(
+        bundle, AssetStore(tmp_path / "destination-assets")
+    )
+
+    reopened_ids = {asset.asset_id for asset in reopened_assets}
+    segment = reopened_state.images[0].stitched_segments[0]
+    assert set(reopened_state.images[0].asset_ids) == reopened_ids
+    assert segment.filename == "long.png"
+    assert segment.display_url in {asset.url for asset in reopened_assets}
+
+
+def test_browser_recovery_rejects_missing_stitched_segment(tmp_path: Path) -> None:
+    _, primary, _ = imported_png(tmp_path, "primary-assets")
+    _, segment, _ = imported_png(tmp_path, "segment-assets")
+    _, recovered, _ = imported_png(tmp_path, "recovered-assets")
+
+    with pytest.raises(ProjectBundleError, match="missing a source image"):
+        remap_canvas_assets(
+            stitched_canvas_state(primary, segment), {primary.asset_id: recovered}
+        )

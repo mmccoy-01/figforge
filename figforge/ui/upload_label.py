@@ -212,6 +212,7 @@ def _properties_panel():
                     class_="property-stack",
                 ),
             ),
+            _property_group("Stitch Exposures", _stitch_controls()),
             _property_group("Lane Guides", _lane_guide_controls()),
             _property_group("Label Rows", _label_row_controls()),
             _property_group("Productivity", _productivity_controls()),
@@ -421,6 +422,54 @@ def _property_group(title: str, content):
         ui.tags.h3(title),
         content,
         class_="property-group",
+    )
+
+
+def _stitch_controls():
+    return ui.tags.div(
+        ui.tags.div(
+            ui.tags.button(
+                "Stitch with…",
+                id="stitch_images",
+                type="button",
+                class_="lane-action",
+                disabled=True,
+                title="Join the selected image with another image on the canvas",
+            ),
+            ui.tags.button(
+                "Unstitch",
+                id="unstitch_image",
+                type="button",
+                class_="lane-action",
+                disabled=True,
+                title="Split back into separate images so each can be re-cropped",
+            ),
+            class_="stitch-actions",
+        ),
+        ui.tags.label(
+            ui.tags.span("Seam line"),
+            ui.tags.select(
+                ui.tags.option("Black", value="black", selected=True),
+                ui.tags.option("White", value="white"),
+                ui.tags.option("None", value="none"),
+                id="stitch_seam",
+                disabled=True,
+            ),
+            class_="label-row-field",
+        ),
+        ui.tags.div(
+            id="stitch_status",
+            class_="label-action-status",
+            role="status",
+            aria_live="polite",
+        ),
+        ui.tags.p(
+            "Crop each exposure to its own lanes, place them in order, then stitch. "
+            "Lane guides and label rows span the combined image. Many journals require "
+            "a visible seam line and a legend note for spliced exposures.",
+            class_="lane-guide-help",
+        ),
+        class_="property-stack",
     )
 
 

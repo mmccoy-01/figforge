@@ -9,6 +9,9 @@ label-grid editing, undo/redo state, and same-browser recovery.
 
 - Uploaded source assets are immutable.
 - Crop and placement are stored as transforms rather than applied to the source.
+- A stitched image is still one canvas image: its primary asset plus
+  `stitched_segments` (other assets with their own crops) laid left to right at a
+  shared height. Lane grids and label rows stay keyed to the one image ID.
 - TIFF sources receive a separate PNG display preview when needed.
 - Portable projects are ZIP-based `.figforge` bundles containing a manifest,
   schema-versioned canvas state, and copies of referenced source assets.

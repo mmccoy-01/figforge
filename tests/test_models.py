@@ -45,6 +45,8 @@ def valid_state() -> dict:
                 "height": 150,
                 "crop": {"x": 0, "y": 0, "width": 1200, "height": 300},
                 "rotation": 0,
+                "stitched_segments": [],
+                "seam_line": "black",
             }
         ],
         "template_frame": None,
@@ -304,3 +306,72 @@ def test_border_extension_is_bounded() -> None:
 
     with pytest.raises(ValueError, match="border extension"):
         CanvasState.from_mapping(payload)
+
+
+def stitched_state() -> dict:
+    payload = valid_state()
+    image = payload["images"][0]
+    # Primary keeps its left 600 px; the long exposure contributes its right 600 px.
+    image["crop"] = {"x": 0, "y": 0, "width": 600, "height": 300}
+    image["stitched_segments"] = [
+        {
+            "asset_id": "asset_2",
+            "filename": "gel-long.png",
+            "source_url": "/assets/asset_2.png",
+            "display_url": "/assets/asset_2.preview.png",
+            "original_width": 1200,
+            "original_height": 300,
+            "crop": {"x": 600, "y": 0, "width": 600, "height": 300},
+        }
+    ]
+    return payload
+
+
+def test_stitched_image_round_trips_and_lists_every_asset() -> None:
+    payload = stitched_state()
+
+    state = CanvasState.from_mapping(payload)
+
+    assert state.to_dict() == payload
+    assert state.images[0].asset_ids == ("asset_1", "asset_2")
+
+
+def test_stitch_layout_splits_image_box_by_crop_aspect() -> None:
+    payload = stitched_state()
+    payload["images"][0]["stitched_segments"][0]["crop"]["width"] = 300
+    payload["images"][0]["stitched_segments"][0]["crop"]["x"] = 900
+
+    layout = CanvasState.from_mapping(payload).images[0].stitch_layout()
+
+    assert [part[0] for part in layout] == ["asset_1", "asset_2"]
+    assert layout[0][5:] == pytest.approx((40, 400))
+    assert layout[1][5:] == pytest.approx((440, 200))
+
+
+def test_stitched_segment_crop_must_stay_inside_its_source() -> None:
+    payload = stitched_state()
+    payload["images"][0]["stitched_segments"][0]["crop"]["x"] = 700
+
+    with pytest.raises(ValueError, match="exceeds the original image"):
+        CanvasState.from_mapping(payload)
+
+
+def test_seam_line_must_be_known() -> None:
+    payload = stitched_state()
+    payload["images"][0]["seam_line"] = "red"
+
+    with pytest.raises(ValueError, match="Seam line"):
+        CanvasState.from_mapping(payload)
+
+
+def test_schema_9_state_loads_without_stitch_fields() -> None:
+    payload = valid_state()
+    payload["schema_version"] = 9
+    del payload["images"][0]["stitched_segments"]
+    del payload["images"][0]["seam_line"]
+
+    state = CanvasState.from_mapping(payload)
+
+    assert state.schema_version == SCHEMA_VERSION
+    assert state.images[0].stitched_segments == ()
+    assert state.images[0].seam_line == "black"

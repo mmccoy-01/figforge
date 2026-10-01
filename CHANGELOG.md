@@ -9,6 +9,13 @@ All notable changes to FigForge are documented here.
 - Paste horizontal (Ctrl/Cmd+Shift+V): flattens copied values, even from
   multiple rows or columns, into a single left-to-right run starting at the
   selected lane.
+- Stitch exposures: join separately cropped images (for example a short and a
+  long exposure of the same gel) side by side into one lane-aligned image.
+  Lane guides and label rows span the combined image, each part still renders
+  from its own immutable source, and an optional black or white seam line marks
+  every splice. Unstitch splits the parts back out for re-cropping, and
+  stitch/unstitch are undoable. Canvas schema is now version 10; version 9
+  projects open unchanged.
 
 ### Fixed
 

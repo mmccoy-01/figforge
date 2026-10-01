@@ -95,42 +95,31 @@ def render_figure(
     grids = {grid.image_id: grid for grid in state.lane_grids}
 
     for image_state in state.images:
-        asset = asset_records.get(image_state.asset_id)
-        if asset is None:
-            raise FigureExportError(f"Missing source asset: {image_state.filename}")
-        source_path = asset_store.root / asset.storage_filename
-        if not source_path.is_file():
-            raise FigureExportError(f"Missing source asset: {image_state.filename}")
-        with Image.open(source_path) as source:
-            source.seek(0)
-            rendered_source = _source_image(source)
-            crop = image_state.crop
-            crop_left = min(image_state.original_width - 1, max(0, round(crop.x)))
-            crop_top = min(image_state.original_height - 1, max(0, round(crop.y)))
-            crop_right = min(
-                image_state.original_width,
-                max(crop_left + 1, round(crop.x + crop.width)),
-            )
-            crop_bottom = min(
-                image_state.original_height,
-                max(crop_top + 1, round(crop.y + crop.height)),
-            )
-            crop_box = (crop_left, crop_top, crop_right, crop_bottom)
-            if crop_box != (0, 0, image_state.original_width, image_state.original_height):
-                rendered_source = rendered_source.crop(crop_box)
-            target_size = (
-                max(1, round(image_state.width * scale)),
-                max(1, round(image_state.height * scale)),
-            )
-            if rendered_source.size != target_size:
-                rendered_source = rendered_source.resize(
-                    target_size, Image.Resampling.LANCZOS
+        layout = image_state.stitch_layout()
+        top = round(image_state.y * scale)
+        bottom = round((image_state.y + image_state.height) * scale)
+        for asset_id, filename, original_width, original_height, crop, part_x, part_width in layout:
+            asset = asset_records.get(asset_id)
+            if asset is None:
+                raise FigureExportError(f"Missing source asset: {filename}")
+            source_path = asset_store.root / asset.storage_filename
+            if not source_path.is_file():
+                raise FigureExportError(f"Missing source asset: {filename}")
+            left = round(part_x * scale)
+            right = round((part_x + part_width) * scale)
+            with Image.open(source_path) as source:
+                source.seek(0)
+                rendered_source = _crop_source(
+                    _source_image(source), crop, original_width, original_height
                 )
-            figure.paste(
-                rendered_source,
-                (round(image_state.x * scale), round(image_state.y * scale)),
-                rendered_source,
-            )
+                target_size = (max(1, right - left), max(1, bottom - top))
+                if rendered_source.size != target_size:
+                    rendered_source = rendered_source.resize(
+                        target_size, Image.Resampling.LANCZOS
+                    )
+                figure.paste(rendered_source, (left, top), rendered_source)
+        if len(layout) > 1 and image_state.seam_line != "none":
+            _draw_stitch_seams(figure, layout, image_state.seam_line, top, bottom, scale)
 
     for image_state in state.images:
         grid = grids.get(image_state.image_id)
@@ -160,6 +149,41 @@ def render_figure(
         figure = figure.crop(crop_box)
 
     return figure.convert("RGB")
+
+
+def _crop_source(
+    rendered_source: Image.Image,
+    crop,
+    original_width: int,
+    original_height: int,
+) -> Image.Image:
+    crop_left = min(original_width - 1, max(0, round(crop.x)))
+    crop_top = min(original_height - 1, max(0, round(crop.y)))
+    crop_right = min(original_width, max(crop_left + 1, round(crop.x + crop.width)))
+    crop_bottom = min(original_height, max(crop_top + 1, round(crop.y + crop.height)))
+    crop_box = (crop_left, crop_top, crop_right, crop_bottom)
+    if crop_box == (0, 0, original_width, original_height):
+        return rendered_source
+    return rendered_source.crop(crop_box)
+
+
+def _draw_stitch_seams(
+    figure: Image.Image,
+    layout,
+    seam_line: str,
+    top: int,
+    bottom: int,
+    scale: float,
+) -> None:
+    """Mark each splice junction so the composite is not mistaken for one exposure."""
+
+    draw = ImageDraw.Draw(figure)
+    line_width = max(1, round(scale))
+    color = (0, 0, 0, 255) if seam_line == "black" else (255, 255, 255, 255)
+    for *_, part_x, part_width in layout[:-1]:
+        seam = round((part_x + part_width) * scale)
+        start = seam - line_width // 2
+        draw.rectangle((start, top, start + line_width - 1, bottom - 1), fill=color)
 
 
 def figure_content_bounds(

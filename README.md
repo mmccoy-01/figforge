@@ -23,6 +23,9 @@ grid. It is designed for figures containing up to 30 lanes.
 - Move, resize, fit, crop, reset, and delete images without changing the source
   file. Undo and redo cover image deletion and label-grid edits (typing,
   paste, clear, fill, and add/delete row).
+- Stitch separately cropped exposures side by side into one lane-aligned image,
+  so a faint assay can use a longer exposure without saturating a bright assay
+  on the same gel. A seam line marks each splice in exports.
 - Align 1–30 uniform lane guides by dragging the outer boundaries.
 - Add label rows above or below an image and paste tabular data from Excel or
   Google Sheets. Paste horizontal (Ctrl/Cmd+Shift+V) flattens copied values

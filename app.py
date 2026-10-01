@@ -351,7 +351,13 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 for entry in asset_entries
                 if isinstance(entry, dict) and entry.get("asset_id")
             }
-            required_ids = tuple(dict.fromkeys(image.asset_id for image in recovered_state.images))
+            required_ids = tuple(
+                dict.fromkeys(
+                    asset_id
+                    for image in recovered_state.images
+                    for asset_id in image.asset_ids
+                )
+            )
             if any(asset_id not in asset_metadata for asset_id in required_ids):
                 raise ValueError("Browser recovery is missing image metadata")
         except (KeyError, TypeError, ValueError) as exc:
