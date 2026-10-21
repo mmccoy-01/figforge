@@ -131,6 +131,10 @@
         () => this.startBlankTemplate(),
       );
       document.getElementById("delete_image")?.addEventListener("click", () => this.deleteSelected());
+      document.getElementById("remove_image_keep_labels")?.addEventListener(
+        "click",
+        () => this.removeSelectedImageKeepLabels(),
+      );
       document.getElementById("undo_action")?.addEventListener("click", () => this.undo());
       document.getElementById("redo_action")?.addEventListener("click", () => this.redo());
       document.getElementById("toggle_lane_guides")?.addEventListener("click", () => this.toggleLaneGuides());
@@ -217,6 +221,10 @@
       labelOverlay?.addEventListener("input", (event) => this.handleCellInput(event));
       labelOverlay?.addEventListener("focusout", (event) => this.handleCellBlur(event));
       labelOverlay?.addEventListener("paste", (event) => this.handleCellPaste(event));
+      // Chrome targets copy/cut at the body when nothing is text-selected, so listen
+      // on the document and check that a label cell has focus.
+      document.addEventListener("copy", (event) => this.handleCellCopy(event, false));
+      document.addEventListener("cut", (event) => this.handleCellCopy(event, true));
       document.addEventListener("pointerup", () => { this.draggingSelection = false; });
     }
 
@@ -595,6 +603,47 @@
       this.redoStack = [];
       this.updateHistoryControls();
       this.syncState(true);
+    }
+
+    // Swap the image for a template frame of the same size so its lane guides and
+    // label rows stay in place; the next uploaded image attaches to that frame.
+    removeSelectedImageKeepLabels() {
+      const image = this.selectedImage();
+      if (!image || image.is_template) return;
+      if (this.templateFrame) {
+        this.showLabelStatus(
+          "Attach an image to the existing empty label frame before removing another image.",
+          "error",
+        );
+        return;
+      }
+      this.cancelStitchPick();
+      if (this.cropMode) this.finishCrop(true);
+      this.finishEditing(true);
+      const before = this.snapshotStructure();
+      this.templateFrame = {
+        image_id: image.image_id,
+        x: image.x,
+        y: image.y,
+        width: image.width,
+        height: image.height,
+        is_template: true,
+      };
+      if (!this.laneGrids.has(image.image_id)) this.createLaneGrid(this.templateFrame, true);
+      this.images = this.images.filter((candidate) => candidate.image_id !== image.image_id);
+      this.imageElements.delete(image.image_id);
+      this.selectedCell = null;
+      this.selectionAnchor = null;
+      this.recordStructureChange(before);
+      this.renderLabelRows();
+      this.updateCellSelection();
+      this.draw();
+      this.updateProperties();
+      this.syncState(true);
+      this.showLabelStatus(
+        "Image removed; labels kept. Upload or pick an image to attach it to these labels.",
+        "success",
+      );
     }
 
     applyDeleteCommand(command) {
@@ -1303,6 +1352,7 @@
           ...grid,
           boundaries: [...grid.boundaries],
         })),
+        templateFrame: this.templateFrame ? { ...this.templateFrame } : null,
         ...this.snapshotLabelState(),
       };
     }
@@ -1319,6 +1369,7 @@
       this.laneGrids = new Map(
         snapshot.grids.map((grid) => [grid.image_id, { ...grid, boundaries: [...grid.boundaries] }]),
       );
+      this.templateFrame = snapshot.templateFrame ? { ...snapshot.templateFrame } : null;
       this.restoreLabelState(snapshot);
       for (const image of this.images) {
         if (this.imageElements.has(image.image_id)) continue;
@@ -1674,6 +1725,10 @@
       document.getElementById("fit_image")?.toggleAttribute("disabled", !image);
       const deleteButton = document.getElementById("delete_image");
       if (deleteButton) deleteButton.disabled = !image || Boolean(image.is_template);
+      document.getElementById("remove_image_keep_labels")?.toggleAttribute(
+        "disabled",
+        !image || Boolean(image.is_template),
+      );
       document.getElementById("add_row")?.toggleAttribute("disabled", !image);
       this.updateCropControls();
       this.updateStitchControls(image);
@@ -2262,6 +2317,15 @@
         return;
       }
 
+      if (commandKey && !event.shiftKey && !editing && ["c", "x"].includes(event.key.toLowerCase())) {
+        // Non-editable cells don't reliably get a native copy event, so trigger one
+        // here while the keypress still grants clipboard access.
+        event.preventDefault();
+        event.stopPropagation();
+        this.copySelectedCells(event.key.toLowerCase() === "x");
+        return;
+      }
+
       if (editing) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -2326,6 +2390,79 @@
     handleCellBlur(event) {
       const cell = event.target.closest('.label-cell[contenteditable="true"]');
       if (cell && this.editingCell) this.finishEditing(true);
+    }
+
+    copySelectedCells(cut) {
+      const text = this.selectionAsTabularText();
+      if (text === null) return;
+      this.cellCopyHandled = false;
+      this.pendingCellCut = cut;
+      try {
+        document.execCommand("copy");
+      } catch (error) {
+        // Fall through to the async clipboard API below.
+      }
+      this.pendingCellCut = false;
+      if (this.cellCopyHandled) return;
+      if (!navigator.clipboard?.writeText) {
+        this.showLabelStatus("Clipboard access isn't available in this browser.", "error");
+        return;
+      }
+      navigator.clipboard.writeText(text)
+        .then(() => this.finishCellCopy(cut))
+        .catch(() => this.showLabelStatus(
+          "Couldn't write to the clipboard. Allow clipboard access for this site.",
+          "error",
+        ));
+    }
+
+    handleCellCopy(event, cut) {
+      const active = document.activeElement;
+      const cell = active instanceof Element
+        ? active.closest("#label_grid_overlay .label-cell")
+        : null;
+      if (!cell || cell.contentEditable === "true") return;
+      const text = this.selectionAsTabularText();
+      if (text === null || !event.clipboardData) return;
+      event.preventDefault();
+      event.clipboardData.setData("text/plain", text);
+      this.cellCopyHandled = true;
+      this.finishCellCopy(cut || Boolean(this.pendingCellCut));
+    }
+
+    finishCellCopy(cut) {
+      const bounds = this.selectionBounds();
+      const count = bounds
+        ? (bounds.bottom - bounds.top + 1) * (bounds.right - bounds.left + 1)
+        : 1;
+      if (cut) this.clearSelectedCells();
+      this.showLabelStatus(
+        `${cut ? "Cut" : "Copied"} ${count} cell${count === 1 ? "" : "s"}. Paste with Ctrl/Cmd+V.`,
+        "success",
+      );
+    }
+
+    // Tab-separated rows, matching what Excel and Google Sheets put on the
+    // clipboard, so pasteTabularText spreads the values back over the same shape.
+    selectionAsTabularText() {
+      const bounds = this.selectionBounds();
+      const clean = (value) => String(value ?? "").replace(/[\t\r\n]+/g, " ");
+      if (!bounds) {
+        const row = this.selectedRow();
+        const cell = row?.cells[this.selectedCell?.col];
+        return cell ? clean(cell.text) : null;
+      }
+      const lines = [];
+      for (let rowIndex = bounds.top; rowIndex <= bounds.bottom; rowIndex += 1) {
+        const row = bounds.rows[rowIndex];
+        const values = [];
+        for (let column = bounds.left; column <= bounds.right; column += 1) {
+          const cell = row.cells[column];
+          values.push(cell && cell.merged_into === null ? clean(cell.text) : "");
+        }
+        lines.push(values.join("\t"));
+      }
+      return lines.join("\n");
     }
 
     handleCellPaste(event) {

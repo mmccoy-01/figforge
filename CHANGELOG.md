@@ -16,8 +16,19 @@ All notable changes to FigForge are documented here.
   every splice. Unstitch splits the parts back out for re-cropping, and
   stitch/unstitch are undoable. Canvas schema is now version 10; version 9
   projects open unchanged.
+- Copy and cut (Ctrl/Cmd+C, Ctrl/Cmd+X) for selected label cells. A copied range
+  goes on the clipboard as tab-separated rows, so Ctrl/Cmd+V pastes it back over
+  the same rows and lanes (and it pastes cleanly into Excel or Google Sheets).
+- Remove image, keep labels: takes an image off the canvas but leaves its lane
+  guides and label rows in an empty label frame. The next image you upload or
+  pick from the image list attaches to those labels. Undoable.
 
 ### Fixed
+
+- Exported label text no longer comes out about 12% larger than it looks in the
+  editor. The editor and the exporter now both use a bundled copy of DejaVu Sans
+  (`figforge/static/fonts`, with its license), instead of the editor using the
+  system UI font and the exporter using whatever DejaVu the server has.
 
 - Undo/redo now cover label-grid edits — typing, tabular paste, paste
   horizontal, clear, fill lane numbers, repeat pattern, and add/delete row —

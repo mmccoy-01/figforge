@@ -283,3 +283,22 @@ def test_stitched_export_requires_every_source_asset(tmp_path: Path) -> None:
 
     with pytest.raises(FigureExportError, match="gone.png"):
         render_figure(CanvasState.from_mapping(payload), (asset,), store, dpi=300)
+
+
+@pytest.mark.parametrize(
+    ("bold", "italic", "filename"),
+    [
+        (False, False, "DejaVuSans.ttf"),
+        (True, False, "DejaVuSans-Bold.ttf"),
+        (False, True, "DejaVuSans-Oblique.ttf"),
+        (True, True, "DejaVuSans-BoldOblique.ttf"),
+    ],
+)
+def test_label_text_uses_the_bundled_font_the_editor_also_loads(
+    bold: bool, italic: bool, filename: str
+) -> None:
+    from figforge.export import LABEL_FONT_DIR, _font
+
+    font = _font(12, bold=bold, italic=italic)
+
+    assert Path(font.path) == LABEL_FONT_DIR / filename

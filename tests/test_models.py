@@ -172,17 +172,34 @@ def test_image_independent_template_frame_is_valid() -> None:
     assert state.to_dict() == payload
 
 
-def test_template_frame_cannot_coexist_with_an_attached_image() -> None:
+def test_label_frame_left_by_a_removed_image_coexists_with_other_images() -> None:
     payload = valid_state()
     payload["template_frame"] = {
         "image_id": "template_1",
+        "x": 40,
+        "y": 300,
+        "width": 600,
+        "height": 150,
+    }
+    payload["lane_grids"].append({**payload["lane_grids"][0], "image_id": "template_1"})
+
+    state = CanvasState.from_mapping(payload)
+
+    assert state.template_frame is not None
+    assert {grid.image_id for grid in state.lane_grids} == {"image_1", "template_1"}
+
+
+def test_template_frame_identifier_must_not_reuse_an_image_identifier() -> None:
+    payload = valid_state()
+    payload["template_frame"] = {
+        "image_id": "image_1",
         "x": 40,
         "y": 80,
         "width": 600,
         "height": 150,
     }
 
-    with pytest.raises(ValueError, match="cannot coexist"):
+    with pytest.raises(ValueError, match="must be unique"):
         CanvasState.from_mapping(payload)
 
 

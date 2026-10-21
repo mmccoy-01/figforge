@@ -14,6 +14,9 @@ from .models import CanvasState, LabelCellState, LabelRowState
 
 
 SCREEN_DPI = 96
+# The editor loads these same files through @font-face (figforge/static/css/app.css)
+# so label text measures identically on screen and in exports.
+LABEL_FONT_DIR = Path(__file__).resolve().parent / "static" / "fonts"
 SUPPORTED_DPI = {300, 600}
 SUPPORTED_FORMATS = {"png", "tiff", "pdf"}
 MAX_OUTPUT_PIXELS = 80_000_000
@@ -612,10 +615,13 @@ def _font(
         suffix = "-Bold"
     elif italic:
         suffix = "-Oblique"
-    try:
-        return ImageFont.truetype(f"{family}{suffix}.ttf", size=size)
-    except OSError:
-        return ImageFont.load_default(size=size)
+    filename = f"{family}{suffix}.ttf"
+    for candidate in (LABEL_FONT_DIR / filename, filename):
+        try:
+            return ImageFont.truetype(str(candidate), size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=size)
 
 
 __all__ = [

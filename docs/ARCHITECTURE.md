@@ -16,6 +16,11 @@ label-grid editing, undo/redo state, and same-browser recovery.
 - Portable projects are ZIP-based `.figforge` bundles containing a manifest,
   schema-versioned canvas state, and copies of referenced source assets.
 - Temporary lane guides and editing affordances are not publication content.
+- A template frame (an image-less surface holding lane guides and label rows)
+  may coexist with images; it is left behind by "Remove image, keep labels" and
+  the next added image takes it over. Template frames are not exported.
+- Label text uses the bundled DejaVu Sans in `figforge/static/fonts` in both the
+  editor (`@font-face`) and the exporter, so on-screen and exported sizes match.
 
 ## Browser/server message contract
 

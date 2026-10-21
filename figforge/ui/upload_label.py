@@ -205,6 +205,17 @@ def _properties_panel():
                         disabled=True,
                         title="Restore the complete immutable source image",
                     ),
+                    ui.tags.button(
+                        "Remove image, keep labels",
+                        id="remove_image_keep_labels",
+                        type="button",
+                        class_="lane-action reset-crop-button",
+                        disabled=True,
+                        title=(
+                            "Take the image off the canvas but keep its lane guides and "
+                            "label rows; the next image you add attaches to them"
+                        ),
+                    ),
                     ui.tags.p(
                         "Crop changes only the visible source region; the uploaded image stays unchanged.",
                         class_="lane-guide-help crop-help",

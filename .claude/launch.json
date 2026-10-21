@@ -4,7 +4,7 @@
     {
       "name": "figforge",
       "runtimeExecutable": ".venv/Scripts/python.exe",
-      "runtimeArgs": ["-m", "shiny", "run", "--reload", "app.py"],
+      "runtimeArgs": ["-m", "shiny", "run", "--reload", "--reload-includes", "*.py,*.css,*.js,*.html", "app.py"],
       "port": 8000
     }
   ]

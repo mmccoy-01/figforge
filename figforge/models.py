@@ -413,8 +413,6 @@ class CanvasState:
         )
         image_ids = {image.image_id for image in images}
         if template_frame is not None:
-            if images:
-                raise ValueError("Template frames cannot coexist with attached images")
             if template_frame.image_id in image_ids:
                 raise ValueError("Template frame identifier must be unique")
             image_ids.add(template_frame.image_id)

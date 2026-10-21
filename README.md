@@ -30,6 +30,10 @@ grid. It is designed for figures containing up to 30 lanes.
 - Add label rows above or below an image and paste tabular data from Excel or
   Google Sheets. Paste horizontal (Ctrl/Cmd+Shift+V) flattens copied values
   into a single row across the lanes.
+- Copy, cut, and paste rectangular cell ranges (Ctrl/Cmd+C, X, V) within FigForge
+  or to and from a spreadsheet.
+- Remove an image but keep its lane guides and label rows, then attach a
+  replacement image to them.
 - Navigate cells with the keyboard; format, merge, and unmerge rectangular ranges
   horizontally or vertically.
 - Apply alignment, font styling, text and cell-fill colors, rotation, borders,

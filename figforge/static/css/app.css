@@ -596,8 +596,42 @@ select:disabled {
   box-shadow: inset 0 0 0 2px rgba(8, 127, 114, 0.38);
 }
 
+/* Bundled DejaVu Sans: the exporter renders labels with these exact files. */
+@font-face {
+  font-family: "FigForge Label";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("/static/fonts/DejaVuSans.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "FigForge Label";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("/static/fonts/DejaVuSans-Bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "FigForge Label";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url("/static/fonts/DejaVuSans-Oblique.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "FigForge Label";
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  src: url("/static/fonts/DejaVuSans-BoldOblique.ttf") format("truetype");
+}
+
 .label-grid-overlay {
   position: absolute;
+  font-family: "FigForge Label", "DejaVu Sans", sans-serif;
   z-index: 3;
   inset: 0;
   overflow: hidden;
